@@ -2,6 +2,7 @@
 
 import { useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ChartComment } from "@/components/chart-comment"
 import { ArrowUp, ArrowDown, TrendingUp, Users, DollarSign, FileText } from "lucide-react"
 
 // Assuming the Deal interface is defined elsewhere and imported
@@ -38,10 +39,19 @@ interface WeeklyStat {
 
 const getWeekStartDate = (dateString: string): string => {
   const date = new Date(dateString);
-  const day = date.getUTCDay();
-  const diff = date.getUTCDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
-  const monday = new Date(date.setUTCDate(diff));
-  return monday.toISOString().split("T")[0];
+  // Use local time instead of UTC to avoid timezone issues
+  const day = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const diff = day === 0 ? -6 : 1 - day; // Calculate days to subtract to get to Monday
+  
+  // Create a new date object to avoid mutating the original
+  const monday = new Date(date.getTime() + diff * 24 * 60 * 60 * 1000);
+  
+  // Format to YYYY-MM-DD using local time
+  const year = monday.getFullYear();
+  const month = String(monday.getMonth() + 1).padStart(2, '0');
+  const dayOfMonth = String(monday.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${dayOfMonth}`;
 };
 
 const formatCurrency = (value: number) => new Intl.NumberFormat("en-AU", {
@@ -70,8 +80,8 @@ const ChangeBadge = ({ value, isRate = false }: { value?: number; isRate?: boole
 };
 
 const MetricDisplay = ({ title, value, change, icon: Icon, isCurrency = false, isRate = false }: { title: string; value: string; change?: number; icon: React.ElementType; isCurrency?: boolean; isRate?: boolean }) => (
-  <div className="flex flex-col p-3 bg-violet/5 rounded-lg">
-    <div className="flex items-center justify-between text-sm text-violet/80">
+  <div className="flex flex-col p-3 rounded-lg border border-violet-300 shadow-sm" style={{backgroundColor: '#f6f3ff'}}>
+    <div className="flex items-center justify-between text-sm text-gray-700 font-medium">
       <span>{title}</span>
       <Icon className="h-4 w-4" />
     </div>
@@ -194,10 +204,10 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
 
   return (
     <div className="space-y-6 mt-4">
-      <Card className="bg-white/60 border-violet/20 shadow-sm">
+      <Card className="bg-white/95 border-violet/30 shadow-md">
         <CardHeader>
-          <CardTitle className="text-violet">Weekly Performance Analysis</CardTitle>
-          <CardDescription className="text-violet/80">
+          <CardTitle className="text-deep-purple-text font-bold">Weekly Performance Analysis</CardTitle>
+          <CardDescription className="text-gray-700">
             A weekly breakdown of key performance metrics. Weekly cards are based on filters. The average is based on all data.
           </CardDescription>
         </CardHeader>
@@ -206,9 +216,9 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
       {weeklyData.length > 0 ? (
         <>
           {averages && (
-            <Card className="bg-violet/10 border-violet/30 shadow-md">
+            <Card className="border-violet-300 shadow-lg" style={{backgroundColor: '#ede8ff'}}>
               <CardHeader>
-                <CardTitle className="text-deep-purple-text">Overall Weekly Average (All Time)</CardTitle>
+                <CardTitle className="text-gray-900 font-bold text-lg">Overall Weekly Average (All Time)</CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <MetricDisplay title="Avg. Total Deals" value={averages.totalDeals.toFixed(1)} icon={FileText} />
@@ -221,7 +231,7 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
 
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {weeklyData.map((stat) => (
-              <Card key={stat.week} className="bg-white/60 border-violet/20 shadow-sm hover:shadow-lg transition-shadow duration-300">
+              <Card key={stat.week} className="bg-white/95 border-violet/30 shadow-md hover:shadow-xl transition-shadow duration-300">
                 <CardHeader>
                   <CardTitle className="text-deep-purple-text">Week of {stat.week}</CardTitle>
                 </CardHeader>
@@ -236,12 +246,14 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
           </div>
         </>
       ) : (
-        <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
+        <Card className="bg-white/95 border-violet/30 shadow-md mt-4">
             <CardContent className="h-48 flex items-center justify-center">
-                 <p className="text-center text-deep-purple-text/70">No weekly data available for the selected filters.</p>
+                 <p className="text-center text-gray-600 font-medium">No weekly data available for the selected filters.</p>
             </CardContent>
         </Card>
       )}
+      
+      <ChartComment chartId="weekly-performance-analysis" chartTitle="Weekly Performance Analysis" />
     </div>
   );
 }

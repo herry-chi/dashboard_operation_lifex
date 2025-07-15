@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -24,9 +24,18 @@ import {
   ArrowDown,
   ZoomOut,
   Home,
+  Maximize,
+  Minimize,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
+import { CalendarIcon } from "lucide-react"
+import { format } from "date-fns"
 import { WeeklyAnalysis } from "@/components/weekly-analysis"
+import { ChartComment } from "@/components/chart-comment"
+import { useFullscreen } from "@/hooks/use-fullscreen"
+import { LoadingAnimation } from "@/components/loading-animation"
 import * as XLSX from "xlsx"
 import Image from "next/image";
 
@@ -648,8 +657,29 @@ function SankeyDiagram({ deals }: { deals: Deal[] }) {
               <div className="p-6 overflow-y-auto h-[calc(90vh-120px)]">
                 <div className="grid gap-6 lg:grid-cols-4">
                   <div className="lg:col-span-1">
-                    <Card><CardHeader><CardTitle className="text-lg">Lost Reasons Distribution</CardTitle><CardDescription>Click a reason to filter the table</CardDescription></CardHeader>
-                      <CardContent>{lostReasonsData.length > 0 ? <div className="flex justify-center"><PieChart data={lostReasonsData} size={250} legendTextColor="text-white" onLegendClick={(label) => setSelectedLostReason(label || null)} selectedLabel={selectedLostReason} /></div> : <div className="flex items-center justify-center h-64 text-deep-purple-text/70">No lost reason data available</div>}</CardContent>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg">Lost Reasons Distribution</CardTitle>
+                        <CardDescription>Click a reason to filter the table</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {lostReasonsData.length > 0 ? (
+                          <div className="flex justify-center">
+                            <PieChart 
+                              data={lostReasonsData} 
+                              size={250} 
+                              legendTextColor="text-white" 
+                              onLegendClick={(label) => setSelectedLostReason(label || null)} 
+                              selectedLabel={selectedLostReason} 
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center h-64 text-deep-purple-text/70">
+                            No lost reason data available
+                          </div>
+                        )}
+                        <ChartComment chartId="lost-reasons-distribution" chartTitle="Lost Reasons Distribution" />
+                      </CardContent>
                     </Card>
                   </div>
                   <div className="lg:col-span-3">
@@ -708,7 +738,7 @@ function SankeyDiagram({ deals }: { deals: Deal[] }) {
 
 export function DealsDashboard() {
   const [deals, setDeals] = useState<Deal[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -718,6 +748,19 @@ export function DealsDashboard() {
   const [endDate, setEndDate] = useState("");
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [newDealsSortField, setNewDealsSortField] = useState<SortField | null>(null);
+  const [newDealsSortDirection, setNewDealsSortDirection] = useState<SortDirection>(null);
+  
+  const { isFullscreen, isSupported, toggleFullscreen } = useFullscreen();
+
+  // Initial loading animation
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2000); // Show loading animation for 2 seconds on initial load
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return; setIsLoading(true); setError(null);
@@ -751,6 +794,20 @@ export function DealsDashboard() {
     if (sortField === field) { if (sortDirection === "asc") setSortDirection("desc"); else if (sortDirection === "desc") { setSortDirection(null); setSortField(null) } else setSortDirection("asc") }
     else { setSortField(field); setSortDirection("asc") }
   }, [sortField, sortDirection]);
+
+  const handleNewDealsSort = useCallback((field: SortField) => {
+    if (newDealsSortField === field) { 
+      if (newDealsSortDirection === "asc") setNewDealsSortDirection("desc"); 
+      else if (newDealsSortDirection === "desc") { setNewDealsSortDirection(null); setNewDealsSortField(null) } 
+      else setNewDealsSortDirection("asc") 
+    }
+    else { setNewDealsSortField(field); setNewDealsSortDirection("asc") }
+  }, [newDealsSortField, newDealsSortDirection]);
+
+  const getNewDealsSortIcon = useCallback((field: string) => { 
+    if (newDealsSortField !== field) return <ArrowUpDown className="h-3 w-3" />; 
+    return newDealsSortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> 
+  }, [newDealsSortField, newDealsSortDirection]);
 
   const getSortIcon = useCallback((field: SortField) => {
     if (sortField !== field) return <ArrowUpDown className="h-4 w-4" />; if (sortDirection === "asc") return <ArrowUp className="h-4 w-4" />; if (sortDirection === "desc") return <ArrowDown className="h-4 w-4" />; return <ArrowUpDown className="h-4 w-4" />
@@ -796,8 +853,11 @@ export function DealsDashboard() {
             if (isNaN(dealDateRaw.getTime())) {
                 matchesDateRange = false;
             } else {
-                // 使用简单的日期字符串比较，避免时区问题
-                const dealDateStr = dealDateRaw.toISOString().split('T')[0]; // 获取 YYYY-MM-DD 格式
+                // 使用本地日期字符串比较，避免时区问题
+                const year = dealDateRaw.getFullYear();
+                const month = String(dealDateRaw.getMonth() + 1).padStart(2, '0');
+                const day = String(dealDateRaw.getDate()).padStart(2, '0');
+                const dealDateStr = `${year}-${month}-${day}`; // 获取 YYYY-MM-DD 格式
 
                 if (startDate) {
                     if (dealDateStr < startDate) {
@@ -882,14 +942,17 @@ export function DealsDashboard() {
   }, [filteredDeals]);
 
   const newDeals = useMemo(() => {
-    return deals.filter(deal => {
+    const filtered = deals.filter(deal => {
       if (!deal.created_time) return false;
       
       const dealDateRaw = new Date(deal.created_time);
       if (isNaN(dealDateRaw.getTime())) return false;
 
-      // 使用简单的日期字符串比较，避免时区问题
-      const dealDateStr = dealDateRaw.toISOString().split('T')[0]; // 获取 YYYY-MM-DD 格式
+      // 使用本地日期字符串比较，避免时区问题
+      const year = dealDateRaw.getFullYear();
+      const month = String(dealDateRaw.getMonth() + 1).padStart(2, '0');
+      const day = String(dealDateRaw.getDate()).padStart(2, '0');
+      const dealDateStr = `${year}-${month}-${day}`; // 获取 YYYY-MM-DD 格式
 
       if (startDate) {
         if (dealDateStr < startDate) return false;
@@ -899,7 +962,54 @@ export function DealsDashboard() {
       }
       return true;
     });
-  }, [deals, startDate, endDate]);
+
+    // Apply sorting if specified
+    if (newDealsSortField && newDealsSortDirection) {
+      return filtered.sort((a, b) => {
+        let aValue: any = "";
+        let bValue: any = "";
+
+        switch (newDealsSortField) {
+          case "deal_name":
+            aValue = a.deal_name || "";
+            bValue = b.deal_name || "";
+            break;
+          case "broker_name":
+            aValue = a.broker_name || "";
+            bValue = b.broker_name || "";
+            break;
+          case "deal_value":
+            aValue = a.deal_value || 0;
+            bValue = b.deal_value || 0;
+            break;
+          case "status":
+            aValue = getDealDisplayStatus(a);
+            bValue = getDealDisplayStatus(b);
+            break;
+          case "source":
+            aValue = a["From Rednote?"] === "Yes" ? "RedNote" : a["From LifeX?"] === "Yes" ? "LifeX" : "Other";
+            bValue = b["From Rednote?"] === "Yes" ? "RedNote" : b["From LifeX?"] === "Yes" ? "LifeX" : "Other";
+            break;
+          case "latest_date":
+            aValue = a.created_time || "";
+            bValue = b.created_time || "";
+            break;
+          default:
+            return 0;
+        }
+
+        if (typeof aValue === "string" && typeof bValue === "string") {
+          const result = aValue.localeCompare(bValue);
+          return newDealsSortDirection === "asc" ? result : -result;
+        } else {
+          const result = aValue - bValue;
+          return newDealsSortDirection === "asc" ? result : -result;
+        }
+      });
+    }
+
+    return filtered;
+  }, [deals, startDate, endDate, newDealsSortField, newDealsSortDirection, getDealDisplayStatus]);
 
   const newDealsStats = useMemo(() => {
     const totalNewDeals = newDeals.length;
@@ -981,86 +1091,571 @@ export function DealsDashboard() {
 
   const formatCurrency = (value: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
 
+  if (isLoading) {
+    return <LoadingAnimation message="Processing your data..." />
+  }
+
   if (deals.length === 0 && !isLoading) {
     return (
-      <div className="bg-light-purple-bg text-deep-purple-text min-h-screen flex flex-col items-center justify-center p-6">
-        <div className="text-center space-y-4">
-          <Image src="/lifex_logo.png" alt="LifeX Logo" width={150} height={60} className="mx-auto" />
-          <h1 className="text-5xl font-black">Deals Dashboard</h1>
-          <p className="text-violet/80 text-lg">Upload your deals file (JSON or Excel) to get started</p>
+      <div className="bg-gradient-to-br from-light-purple-bg to-violet/10 text-deep-purple-text min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
+        {/* Background decoration */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-violet/10 rounded-full blur-3xl"></div>
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-hot-pink/10 rounded-full blur-3xl"></div>
         </div>
-        <Card className="w-full max-w-lg mt-8 bg-white/50 border-violet/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-2xl font-bold"><Upload className="h-6 w-6" />Upload Data File</CardTitle>
-            <CardDescription className="text-violet/80">Select your deals JSON or Excel file to load the dashboard</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <Input type="file" accept=".json, .xlsx, .xls" onChange={handleFileUpload} disabled={isLoading} className="text-deep-purple-text file:text-hot-pink file:bg-violet/20 hover:file:bg-violet/30" />
-              {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
-              <div className="text-sm text-deep-purple-text/70">
-                <p>Supported formats: JSON or Excel (.xlsx, .xls).</p>
-                <p className="mt-2">For Excel, ensure the first row contains headers matching the deal properties.</p>
-                <pre className="mt-2 p-2 bg-violet/10 rounded text-xs">{`JSON example:\n[\n  {\n    "deal_id": "1",\n    "deal_name": "...",\n    "broker_name": "...",\n    "deal_value": 750000,\n    "status": "...",\n    ...\n  }\n]`}</pre>
-              </div>
+        
+        {/* Large background logo */}
+        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+          <div className="relative animate-pulse">
+            <Image 
+              src="/lifex_logo.png" 
+              alt="LifeX Background Logo" 
+              width={1000} 
+              height={400} 
+              className="opacity-[0.04] select-none pointer-events-none transform scale-125 filter blur-[0.5px]"
+            />
+            {/* Additional logo layer for depth */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Image 
+                src="/lifex_logo.png" 
+                alt="LifeX Background Logo Secondary" 
+                width={600} 
+                height={240} 
+                className="opacity-[0.02] select-none pointer-events-none transform scale-110 filter blur-[1px]"
+              />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+        
+        <div className="relative z-10 w-full max-w-2xl">
+          {/* Header Section */}
+          <div className="text-center space-y-6 mb-12">
+            <div className="relative inline-block">
+              <Image 
+                src="/lifex_logo.png" 
+                alt="LifeX Logo" 
+                width={140} 
+                height={56} 
+                className="mx-auto drop-shadow-xl filter brightness-110" 
+              />
+            </div>
+            <div className="space-y-3">
+              <h1 className="text-5xl font-black bg-gradient-to-r from-violet via-hot-pink to-violet bg-clip-text text-transparent tracking-tight">
+                Deals Dashboard
+              </h1>
+              <p className="text-violet/70 text-lg font-medium">
+                Powerful analytics for your deals data
+              </p>
+            </div>
+          </div>
+
+          {/* Upload Card */}
+          <Card className="bg-white/85 backdrop-blur-md border-0 shadow-2xl shadow-violet/25 ring-1 ring-violet/10">
+            <CardContent className="p-8">
+              <div className="text-center space-y-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-violet to-hot-pink rounded-full mb-4">
+                  <Upload className="h-8 w-8 text-white" />
+                </div>
+                
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-bold text-violet">Upload Your Data</h2>
+                  <p className="text-violet/70">
+                    Drag and drop your file here, or click to browse
+                  </p>
+                </div>
+
+                {/* Upload Area */}
+                <div className="relative">
+                  <div className="border-2 border-dashed border-violet/30 rounded-xl p-8 hover:border-violet/50 transition-colors duration-200 hover:bg-violet/5">
+                    <Input 
+                      type="file" 
+                      accept=".json, .xlsx, .xls" 
+                      onChange={handleFileUpload} 
+                      disabled={isLoading}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <div className="text-center space-y-3">
+                      <div className="text-violet/60 text-lg">
+                        <FileText className="h-12 w-12 mx-auto mb-3 text-violet/40" />
+                        Choose file or drag it here
+                      </div>
+                      <div className="flex items-center justify-center space-x-4 text-sm text-violet/50">
+                        <span className="px-3 py-1 bg-violet/10 rounded-full">JSON</span>
+                        <span className="px-3 py-1 bg-violet/10 rounded-full">Excel</span>
+                        <span className="px-3 py-1 bg-violet/10 rounded-full">CSV</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {error && (
+                  <Alert variant="destructive" className="border-red-200 bg-red-50">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription className="text-red-700">{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Info Section */}
+                <div className="bg-violet/5 rounded-lg p-4 text-left">
+                  <h3 className="font-semibold text-violet mb-2 flex items-center gap-2">
+                    <Home className="h-4 w-4" />
+                    File Requirements
+                  </h3>
+                  <ul className="text-sm text-violet/70 space-y-1">
+                    <li>• Supported formats: JSON, Excel (.xlsx, .xls)</li>
+                    <li>• Maximum file size: 10MB</li>
+                    <li>• First row should contain column headers</li>
+                    <li>• Required fields: deal_id, deal_name, broker_name, deal_value</li>
+                  </ul>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Footer */}
+          <div className="text-center mt-8 text-violet/50 text-sm">
+            Secure file processing • Your data stays private
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-light-purple-bg text-deep-purple-text min-h-screen font-sans">
-      <header className="p-4 flex justify-between items-center sticky top-0 z-40 bg-light-purple-bg/80 backdrop-blur-lg border-b border-violet/20">
-        <Image src="/lifex_logo.png" alt="LifeX Logo" width={120} height={48} />
-        <h1 className="text-3xl font-black tracking-wider">DEALS DASHBOARD</h1>
-        <Button variant="outline" onClick={() => { setDeals([]); setError(null) }} className="bg-transparent border-hot-pink text-hot-pink hover:bg-hot-pink hover:text-white transition-all duration-300 font-bold">
-          <Upload className="h-4 w-4 mr-2" />Upload New File
-        </Button>
+    <div className="bg-gradient-to-br from-light-purple-bg via-violet/5 to-light-purple-bg text-deep-purple-text min-h-screen font-sans relative overflow-hidden">
+      {/* Background decorative elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-gradient-to-br from-violet/10 to-hot-pink/10 rounded-full blur-3xl"></div>
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-hot-pink/10 to-violet/10 rounded-full blur-3xl"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial from-violet/5 to-transparent rounded-full blur-2xl"></div>
+      </div>
+
+      {/* Subtle background logo */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none overflow-hidden">
+        <Image 
+          src="/lifex_logo.png" 
+          alt="Background Logo" 
+          width={800} 
+          height={320} 
+          className="opacity-[0.015] select-none transform scale-150 filter blur-[1px]"
+        />
+      </div>
+
+      <header className="relative z-50 p-6 flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur-xl border-b border-violet/20 shadow-lg shadow-violet/10">
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <Image 
+              src="/lifex_logo.png" 
+              alt="LifeX Logo" 
+              width={140} 
+              height={56} 
+              className="filter drop-shadow-lg" 
+            />
+          </div>
+        </div>
+        
+        <div className="text-center">
+          <h1 className="text-4xl font-black bg-gradient-to-r from-purple-700 via-pink-600 to-purple-700 bg-clip-text text-transparent tracking-wider">
+            DEALS DASHBOARD
+          </h1>
+          <p className="text-gray-700 text-sm font-semibold mt-1">
+            Real-time analytics & insights
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {isSupported && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toggleFullscreen()}
+              className="bg-white/60 border-violet/30 text-violet hover:bg-violet hover:text-white transition-all duration-300 shadow-sm hover:shadow-lg backdrop-blur-sm"
+              title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+            >
+              {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+            </Button>
+          )}
+          <Button 
+            variant="outline" 
+            onClick={() => { setDeals([]); setError(null) }} 
+            className="bg-gradient-to-r from-hot-pink to-violet text-white border-0 hover:from-violet hover:to-hot-pink transition-all duration-300 font-semibold shadow-lg hover:shadow-xl transform hover:scale-105"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Upload New File
+          </Button>
+        </div>
       </header>
 
-      <div className="container mx-auto p-6 space-y-6">
-        <Card className="bg-white/60 border-violet/20 shadow-sm">
-          <CardHeader><CardTitle className="flex items-center gap-2 text-xl font-bold text-violet"><Filter className="h-5 w-5" />Time Filters</CardTitle></CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <label className="text-sm font-medium mb-2 block text-violet">Start Date</label>
-                <Input type="date" placeholder="Start date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-violet/10 border-violet/30 text-deep-purple-text" />
+      <div className="relative z-40 container mx-auto p-8 space-y-8">
+        <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-2xl shadow-violet/10 ring-1 ring-violet/20">
+          <CardHeader className="pb-6">
+            <CardTitle className="flex items-center gap-3 text-2xl font-bold">
+              <div className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg">
+                <Filter className="h-5 w-5 text-white" />
               </div>
-              <div>
-                <label className="text-sm font-medium mb-2 block text-violet">End Date</label>
-                <Input type="date" placeholder="End date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-violet/10 border-violet/30 text-deep-purple-text" />
+              <span className="text-gray-800 font-black">
+                Time Filters
+              </span>
+            </CardTitle>
+            <CardDescription className="text-gray-600 text-base font-medium">
+              Filter your deals data by date range to focus on specific time periods
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                  <div className="w-2 h-2 bg-purple-600 rounded-full"></div>
+                  Start Date
+                </label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal bg-white border-gray-300 text-gray-800 focus:border-purple-500 focus:ring-purple-500/20 transition-all duration-200 hover:bg-gray-50"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {startDate ? format(new Date(startDate), "PPP") : "Pick a start date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={startDate ? new Date(startDate) : undefined}
+                      onSelect={(date) => setStartDate(date ? format(date, "yyyy-MM-dd") : "")}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                  <div className="w-2 h-2 bg-pink-600 rounded-full"></div>
+                  End Date
+                </label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal bg-white border-gray-300 text-gray-800 focus:border-pink-500 focus:ring-pink-500/20 transition-all duration-200 hover:bg-gray-50"
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {endDate ? format(new Date(endDate), "PPP") : "Pick an end date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={endDate ? new Date(endDate) : undefined}
+                      onSelect={(date) => setEndDate(date ? format(date, "yyyy-MM-dd") : "")}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="flex items-end">
-                <Button variant="outline" onClick={() => { setStartDate(""); setEndDate("") }} className="bg-transparent border-violet/50 text-violet hover:bg-violet/20 w-full">Clear Dates</Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => { setStartDate(""); setEndDate("") }} 
+                  className="bg-white border-gray-300 text-gray-700 hover:bg-gray-100 hover:border-gray-400 transition-all duration-200 w-full font-semibold"
+                >
+                  <ZoomOut className="h-4 w-4 mr-2" />
+                  Clear Dates
+                </Button>
               </div>
               <div className="flex items-end gap-2">
-                <Button variant="secondary" size="sm" onClick={() => { const today = new Date(); setStartDate(today.toISOString().split("T")[0]); setEndDate(today.toISOString().split("T")[0]) }} className="w-full">Today</Button>
-                <Button variant="secondary" size="sm" onClick={() => { const today = new Date(), weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000); setStartDate(weekAgo.toISOString().split("T")[0]); setEndDate(today.toISOString().split("T")[0]) }} className="w-full">Last 7 Days</Button>
+                <Button 
+                  variant="secondary" 
+                  size="sm" 
+                  onClick={() => { 
+                    const today = new Date(); 
+                    setStartDate(today.toISOString().split("T")[0]); 
+                    setEndDate(today.toISOString().split("T")[0]) 
+                  }} 
+                  className="flex-1 bg-purple-100 hover:bg-purple-200 text-purple-700 border-0 transition-all duration-200 font-semibold"
+                >
+                  Today
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  size="sm" 
+                  onClick={() => { 
+                    const today = new Date(); 
+                    const currentDay = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+                    const daysToLastMonday = currentDay === 0 ? 6 : currentDay - 1; // If Sunday, go back 6 days to Monday
+                    const lastMonday = new Date(today.getTime() - (daysToLastMonday + 7) * 24 * 60 * 60 * 1000);
+                    const lastSunday = new Date(lastMonday.getTime() + 6 * 24 * 60 * 60 * 1000);
+                    setStartDate(lastMonday.toISOString().split("T")[0]); 
+                    setEndDate(lastSunday.toISOString().split("T")[0]) 
+                  }} 
+                  className="flex-1 bg-pink-100 hover:bg-pink-200 text-pink-700 border-0 transition-all duration-200 font-semibold"
+                >
+                  7 Days
+                </Button>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="bg-white/60 border-violet/20 shadow-sm"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-violet">Total Deals</CardTitle><FileText className="h-4 w-4 text-violet/70" /></CardHeader><CardContent><div className="text-4xl font-bold text-hot-pink">{stats.totalDeals}</div><p className="text-xs text-violet/80">{stats.settledCount} settled, {stats.lostDeals} lost {(searchTerm || statusFilter !== "all" || brokerFilter !== "all" || sourceFilter !== "all" || startDate || endDate) && " (filtered)"}</p></CardContent></Card>
-          <Card className="bg-white/60 border-violet/20 shadow-sm"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-violet">Settled Rate</CardTitle><TrendingUp className="h-4 w-4 text-violet/70" /></CardHeader><CardContent><div className="text-4xl font-bold text-hot-pink">{stats.settledRate}%</div><p className="text-xs text-violet/80">{stats.settledCount} of {stats.totalDeals} deals settled</p></CardContent></Card>
-          <Card className="bg-white/60 border-violet/20 shadow-sm"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-violet">Total Settled Value</CardTitle><DollarSign className="h-4 w-4 text-violet/70" /></CardHeader><CardContent><div className="text-4xl font-bold text-hot-pink">{formatCurrency(stats.settledValue)}</div><p className="text-xs text-violet/80">From {stats.settledCount} deals</p></CardContent></Card>
-          <Card className="bg-white/60 border-violet/20 shadow-sm"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-violet">Conversion Rate</CardTitle><Users className="h-4 w-4 text-violet/70" /></CardHeader><CardContent><div className="text-4xl font-bold text-hot-pink">{stats.conversionRate}%</div><p className="text-xs text-violet/80">{stats.convertedCount} of {stats.totalDeals} deals converted</p></CardContent></Card>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-xl shadow-violet/10 ring-1 ring-violet/20 hover:shadow-2xl hover:ring-violet/30 transition-all duration-300 group">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold text-gray-700">Total Deals</CardTitle>
+              <div className="p-2 bg-gradient-to-r from-purple-100 to-pink-100 rounded-lg group-hover:from-purple-200 group-hover:to-pink-200 transition-all duration-300">
+                <FileText className="h-4 w-4 text-purple-600" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black bg-gradient-to-r from-purple-700 to-pink-600 bg-clip-text text-transparent mb-2">
+                {stats.totalDeals}
+              </div>
+              <p className="text-xs text-gray-600 font-semibold">
+                {stats.settledCount} settled, {stats.lostDeals} lost
+                {(searchTerm || statusFilter !== "all" || brokerFilter !== "all" || sourceFilter !== "all" || startDate || endDate) && " (filtered)"}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-xl shadow-violet/10 ring-1 ring-violet/20 hover:shadow-2xl hover:ring-violet/30 transition-all duration-300 group">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold text-gray-700">Settled Rate</CardTitle>
+              <div className="p-2 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg group-hover:from-green-200 group-hover:to-emerald-200 transition-all duration-300">
+                <TrendingUp className="h-4 w-4 text-green-600" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black bg-gradient-to-r from-purple-700 to-pink-600 bg-clip-text text-transparent mb-2">
+                {stats.settledRate}%
+              </div>
+              <p className="text-xs text-gray-600 font-semibold">
+                {stats.settledCount} of {stats.totalDeals} deals settled
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-xl shadow-violet/10 ring-1 ring-violet/20 hover:shadow-2xl hover:ring-violet/30 transition-all duration-300 group">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold text-gray-700">Total Settled Value</CardTitle>
+              <div className="p-2 bg-gradient-to-r from-emerald-100 to-green-100 rounded-lg group-hover:from-emerald-200 group-hover:to-green-200 transition-all duration-300">
+                <DollarSign className="h-4 w-4 text-emerald-600" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black bg-gradient-to-r from-purple-700 to-pink-600 bg-clip-text text-transparent mb-2">
+                {formatCurrency(stats.settledValue)}
+              </div>
+              <p className="text-xs text-gray-600 font-semibold">
+                From {stats.settledCount} deals
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-xl shadow-violet/10 ring-1 ring-violet/20 hover:shadow-2xl hover:ring-violet/30 transition-all duration-300 group">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-bold text-gray-700">Conversion Rate</CardTitle>
+              <div className="p-2 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-lg group-hover:from-blue-200 group-hover:to-indigo-200 transition-all duration-300">
+                <Users className="h-4 w-4 text-blue-600" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-black bg-gradient-to-r from-purple-700 to-pink-600 bg-clip-text text-transparent mb-2">
+                {stats.conversionRate}%
+              </div>
+              <p className="text-xs text-gray-600 font-semibold">
+                {stats.convertedCount} of {stats.totalDeals} deals converted
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         <Tabs defaultValue="overview">
-          <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="new-deals">New Deals</TabsTrigger>
-            <TabsTrigger value="brokers">Brokers</TabsTrigger>
-            <TabsTrigger value="pipeline">Pipeline Analysis</TabsTrigger>
-            <TabsTrigger value="weekly-analysis">Weekly Analysis</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-5 bg-white/95 backdrop-blur-xl border-0 shadow-xl shadow-violet/10 ring-1 ring-violet/20 p-1 rounded-2xl h-12">
+            <TabsTrigger 
+              value="overview" 
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300 font-semibold rounded-xl text-gray-700 hover:text-gray-900 h-10 flex items-center justify-center"
+            >
+              Overview
+            </TabsTrigger>
+            <TabsTrigger 
+              value="new-deals"
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300 font-semibold rounded-xl text-gray-700 hover:text-gray-900 h-10 flex items-center justify-center"
+            >
+              New Deals
+            </TabsTrigger>
+            <TabsTrigger 
+              value="brokers"
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300 font-semibold rounded-xl text-gray-700 hover:text-gray-900 h-10 flex items-center justify-center"
+            >
+              Brokers
+            </TabsTrigger>
+            <TabsTrigger 
+              value="pipeline"
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300 font-semibold rounded-xl text-gray-700 hover:text-gray-900 h-10 flex items-center justify-center"
+            >
+              Pipeline Analysis
+            </TabsTrigger>
+            <TabsTrigger 
+              value="weekly-analysis"
+              className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-300 font-semibold rounded-xl text-gray-700 hover:text-gray-900 h-10 flex items-center justify-center"
+            >
+              Weekly Analysis
+            </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="overview"><Card className="bg-white/60 border-violet/20 shadow-sm mt-4"><CardHeader><CardTitle className="text-violet">Deals Overview</CardTitle><CardDescription className="text-violet/80">A summary of all deals based on the current filters.</CardDescription></CardHeader><CardContent className="space-y-6"><div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3"><div className="lg:col-span-1"><h3 className="font-semibold mb-2 text-center text-lg text-violet">Lead Sources</h3><p className="text-center text-sm text-violet/70 mb-4">Total: {leadSourcesData.reduce((sum, item) => sum + item.value, 0)} deals</p><PieChart data={leadSourcesData} size={250} /></div><div className="lg:col-span-2"><h3 className="font-semibold mb-2 text-center text-lg text-violet">Broker Distribution</h3><p className="text-center text-sm text-violet/70 mb-4">Total: {brokerDistributionData.outerData.reduce((sum, item) => sum + item.value, 0)} deals</p><DoubleRingPieChart outerData={brokerDistributionData.outerData} innerData={brokerDistributionData.innerData} size={350} /></div></div></CardContent></Card></TabsContent>
+          <TabsContent value="overview">
+            <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-2xl shadow-violet/10 ring-1 ring-violet/20 mt-6">
+              <CardHeader>
+                <CardTitle className="text-gray-800 font-bold">Deals Overview</CardTitle>
+                <CardDescription className="text-gray-600 font-medium">A summary of all deals based on the current filters.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                  <div className="lg:col-span-1">
+                    <h3 className="font-semibold mb-2 text-center text-lg text-violet">Lead Sources</h3>
+                    <p className="text-center text-sm text-violet/70 mb-4">Total: {leadSourcesData.reduce((sum, item) => sum + item.value, 0)} deals</p>
+                    <PieChart data={leadSourcesData} size={250} />
+                    <ChartComment chartId="lead-sources" chartTitle="Lead Sources" />
+                  </div>
+                  <div className="lg:col-span-2">
+                    <h3 className="font-semibold mb-2 text-center text-lg text-violet">Broker Distribution</h3>
+                    <p className="text-center text-sm text-violet/70 mb-4">Total: {brokerDistributionData.outerData.reduce((sum, item) => sum + item.value, 0)} deals</p>
+                    <DoubleRingPieChart outerData={brokerDistributionData.outerData} innerData={brokerDistributionData.innerData} size={350} />
+                    <ChartComment chartId="broker-distribution" chartTitle="Broker Distribution" />
+                  </div>
+                </div>
+                
+                <Card className="bg-white/60 border-violet/20 shadow-sm mt-6">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-xl font-bold text-violet">
+                      <Search className="h-5 w-5" />
+                      All Deals ({filteredDeals.length} total)
+                    </CardTitle>
+                    <div className="flex gap-4 pt-4">
+                      <Input 
+                        placeholder="Search by deal or broker..." 
+                        value={searchTerm} 
+                        onChange={(e) => setSearchTerm(e.target.value)} 
+                        className="max-w-sm bg-violet/10 border-violet/30 text-deep-purple-text" 
+                      />
+                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="w-[180px] bg-violet/10 border-violet/30 text-deep-purple-text">
+                          <SelectValue placeholder="Filter by status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[{ value: "all", label: "All Statuses" }, ...statusCounts.map(([status]) => ({ value: status, label: status }))].map(s => 
+                            <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Select value={brokerFilter} onValueChange={setBrokerFilter}>
+                        <SelectTrigger className="w-[180px] bg-violet/10 border-violet/30 text-deep-purple-text">
+                          <SelectValue placeholder="Filter by broker" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[{ value: "all", label: "All Brokers" }, ...brokers.map(b => ({ value: b.name, label: b.name }))].map(b => 
+                            <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                        <SelectTrigger className="w-[180px] bg-violet/10 border-violet/30 text-deep-purple-text">
+                          <SelectValue placeholder="Filter by source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Sources</SelectItem>
+                          <SelectItem value="rednote">RedNote</SelectItem>
+                          <SelectItem value="lifex">LifeX</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="rounded-md border border-violet/20">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>
+                              <Button variant="ghost" onClick={() => handleSort("deal_name")}>
+                                Deal Name {getSortIcon("deal_name")}
+                              </Button>
+                            </TableHead>
+                            <TableHead>
+                              <Button variant="ghost" onClick={() => handleSort("broker_name")}>
+                                Broker {getSortIcon("broker_name")}
+                              </Button>
+                            </TableHead>
+                            <TableHead>
+                              <Button variant="ghost" onClick={() => handleSort("deal_value")}>
+                                Value {getSortIcon("deal_value")}
+                              </Button>
+                            </TableHead>
+                            <TableHead>
+                              <Button variant="ghost" onClick={() => handleSort("status")}>
+                                Status {getSortIcon("status")}
+                              </Button>
+                            </TableHead>
+                            <TableHead>
+                              <Button variant="ghost" onClick={() => handleSort("source")}>
+                                Source {getSortIcon("source")}
+                              </Button>
+                            </TableHead>
+                            <TableHead>
+                              <Button variant="ghost" onClick={() => handleSort("process_days")}>
+                                Process Days {getSortIcon("process_days")}
+                              </Button>
+                            </TableHead>
+                            <TableHead>
+                              <Button variant="ghost" onClick={() => handleSort("latest_date")}>
+                                Latest Update {getSortIcon("latest_date")}
+                              </Button>
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredDeals.length > 0 ? (
+                            filteredDeals.map((deal) => (
+                              <TableRow key={deal.deal_id}>
+                                <TableCell className="font-medium text-deep-purple-text">
+                                  {deal.deal_name}
+                                </TableCell>
+                                <TableCell className="text-deep-purple-text">
+                                  {deal.broker_name}
+                                </TableCell>
+                                <TableCell className="text-deep-purple-text">
+                                  {formatCurrency(deal.deal_value)}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge className={getStatusBadgeClass(getDealDisplayStatus(deal))}>
+                                    {getDealDisplayStatus(deal)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-deep-purple-text">
+                                  {deal["From Rednote?"] === "Yes" ? "RedNote" : 
+                                   deal["From LifeX?"] === "Yes" ? "LifeX" : "Other"}
+                                </TableCell>
+                                <TableCell className="text-deep-purple-text">
+                                  {deal["process days"]}
+                                </TableCell>
+                                <TableCell className="text-deep-purple-text">
+                                  {deal.latest_date ? new Date(deal.latest_date).toLocaleDateString() : "N/A"}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow>
+                              <TableCell colSpan={7} className="h-24 text-center text-deep-purple-text/70">
+                                No results found.
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </CardContent>
+            </Card>
+          </TabsContent>
           <TabsContent value="new-deals">
             <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
               <CardHeader>
@@ -1068,7 +1663,27 @@ export function DealsDashboard() {
                 <CardDescription className="text-violet/80">Analysis of deals created within the selected date range.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"><Card className="bg-white/60 border-violet/20 shadow-sm"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-violet">Total New Deals</CardTitle><FileText className="h-4 w-4 text-violet/70" /></CardHeader><CardContent><div className="text-4xl font-bold text-hot-pink">{newDealsStats.totalNewDeals}</div></CardContent></Card><Card className="bg-white/60 border-violet/20 shadow-sm"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-violet">Total New Value</CardTitle><DollarSign className="h-4 w-4 text-violet/70" /></CardHeader><CardContent><div className="text-4xl font-bold text-hot-pink">{formatCurrency(newDealsStats.totalNewValue)}</div></CardContent></Card></div><div className="grid gap-4 md:grid-cols-2 mt-4">
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <Card className="bg-white/60 border-violet/20 shadow-sm">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium text-violet">Total New Deals</CardTitle>
+                      <FileText className="h-4 w-4 text-violet/70" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-4xl font-bold text-hot-pink">{newDealsStats.totalNewDeals}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-white/60 border-violet/20 shadow-sm">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium text-violet">Total New Value</CardTitle>
+                      <DollarSign className="h-4 w-4 text-violet/70" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-4xl font-bold text-hot-pink">{formatCurrency(newDealsStats.totalNewValue)}</div>
+                    </CardContent>
+                  </Card>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 mt-4">
                   <Card className="bg-white/60 border-violet/20 shadow-sm">
                     <CardHeader>
                       <CardTitle className="text-violet">New Deals by Broker</CardTitle>
@@ -1080,6 +1695,7 @@ export function DealsDashboard() {
                         onBarClick={(label) => setSelectedBrokerForSourceChart(label || null)}
                         selectedLabel={selectedBrokerForSourceChart}
                       />
+                      <ChartComment chartId="new-deals-by-broker" chartTitle="New Deals by Broker" />
                     </CardContent>
                   </Card>
                   <Card className="bg-white/60 border-violet/20 shadow-sm">
@@ -1115,65 +1731,144 @@ export function DealsDashboard() {
                           </div>
                         )
                       )}
+                      <ChartComment chartId="new-deals-by-source" chartTitle="New Deals by Source" />
                     </CardContent>
                   </Card>
-                </div><div className="rounded-md border border-violet/20 mt-4"><Table><TableHeader><TableRow><TableHead>Deal Name</TableHead><TableHead>Broker</TableHead><TableHead>Value</TableHead><TableHead>Status</TableHead><TableHead>Source</TableHead><TableHead>Created Date</TableHead></TableRow></TableHeader><TableBody>{newDeals.length > 0 ? (newDeals.map((deal) => (<TableRow key={deal.deal_id}><TableCell className="font-medium text-deep-purple-text">{deal.deal_name}</TableCell><TableCell className="text-deep-purple-text">{deal.broker_name}</TableCell><TableCell className="text-deep-purple-text">{formatCurrency(deal.deal_value)}</TableCell><TableCell><Badge className={getStatusBadgeClass(getDealDisplayStatus(deal))}>{getDealDisplayStatus(deal)}</Badge></TableCell><TableCell className="text-deep-purple-text">{deal["From Rednote?"] === "Yes" ? "RedNote" : deal["From LifeX?"] === "Yes" ? "LifeX" : "Other"}</TableCell><TableCell className="text-deep-purple-text">{deal.created_time ? new Date(deal.created_time).toLocaleDateString() : "N/A"}</TableCell></TableRow>))) : (<TableRow><TableCell colSpan={6} className="h-24 text-center">No new deals in the selected date range.</TableCell></TableRow>)}</TableBody></Table></div>
+                </div>
+                <div className="rounded-md border border-violet/20 mt-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>
+                          <Button variant="ghost" onClick={() => handleNewDealsSort("deal_name")}>
+                            Deal Name {getNewDealsSortIcon("deal_name")}
+                          </Button>
+                        </TableHead>
+                        <TableHead>
+                          <Button variant="ghost" onClick={() => handleNewDealsSort("broker_name")}>
+                            Broker {getNewDealsSortIcon("broker_name")}
+                          </Button>
+                        </TableHead>
+                        <TableHead>
+                          <Button variant="ghost" onClick={() => handleNewDealsSort("deal_value")}>
+                            Value {getNewDealsSortIcon("deal_value")}
+                          </Button>
+                        </TableHead>
+                        <TableHead>
+                          <Button variant="ghost" onClick={() => handleNewDealsSort("status")}>
+                            Status {getNewDealsSortIcon("status")}
+                          </Button>
+                        </TableHead>
+                        <TableHead>
+                          <Button variant="ghost" onClick={() => handleNewDealsSort("source")}>
+                            Source {getNewDealsSortIcon("source")}
+                          </Button>
+                        </TableHead>
+                        <TableHead>
+                          <Button variant="ghost" onClick={() => handleNewDealsSort("latest_date")}>
+                            Created Date {getNewDealsSortIcon("latest_date")}
+                          </Button>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {newDeals.length > 0 ? (
+                        newDeals.map((deal) => (
+                          <TableRow key={deal.deal_id}>
+                            <TableCell className="font-medium text-deep-purple-text">
+                              {deal.deal_name}
+                            </TableCell>
+                            <TableCell className="text-deep-purple-text">
+                              {deal.broker_name}
+                            </TableCell>
+                            <TableCell className="text-deep-purple-text">
+                              {formatCurrency(deal.deal_value)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={getStatusBadgeClass(getDealDisplayStatus(deal))}>
+                                {getDealDisplayStatus(deal)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-deep-purple-text">
+                              {deal["From Rednote?"] === "Yes" ? "RedNote" : 
+                               deal["From LifeX?"] === "Yes" ? "LifeX" : "Other"}
+                            </TableCell>
+                            <TableCell className="text-deep-purple-text">
+                              {deal.created_time ? new Date(deal.created_time).toLocaleDateString() : "N/A"}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={6} className="h-24 text-center">
+                            No new deals in the selected date range.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
           <TabsContent value="brokers">
-            <Card className="bg-white/60 border-violet/20 shadow-sm mt-4"><CardHeader><CardTitle className="text-violet">Broker Performance</CardTitle><CardDescription className="text-violet/80">Performance metrics for each broker. Total brokers: {brokers.length}, Total deals: {brokers.reduce((sum, broker) => sum + broker.total, 0)}</CardDescription></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Total Deals</TableHead><TableHead>Settled Deals</TableHead><TableHead>Settled Rate</TableHead><TableHead>Total Value Settled</TableHead></TableRow></TableHeader><TableBody>{brokers.map((broker) => (<TableRow key={broker.name}><TableCell className="font-medium text-deep-purple-text">{broker.name}</TableCell><TableCell className="text-deep-purple-text">{broker.total}</TableCell><TableCell className="text-deep-purple-text">{broker.settled}</TableCell><TableCell className="text-deep-purple-text">{broker.settledRate}%</TableCell><TableCell className="text-deep-purple-text">{formatCurrency(broker.value)}</TableCell></TableRow>))}</TableBody></Table></CardContent></Card>
-            <Card className="bg-white/60 border-violet/20 shadow-sm mt-4"><CardHeader><CardTitle className="text-violet">Settlement Analysis</CardTitle><CardDescription className="text-violet/80">Interactive treemap of settled deals by value. Total settled: {filteredDeals.filter(d => d["6. Settled"] && d["6. Settled"].trim() !== "").length} deals</CardDescription></CardHeader><CardContent><InteractiveTreemap deals={filteredDeals} /></CardContent></Card>
+            <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
+              <CardHeader>
+                <CardTitle className="text-violet">Broker Performance</CardTitle>
+                <CardDescription className="text-violet/80">Performance metrics for each broker. Total brokers: {brokers.length}, Total deals: {brokers.reduce((sum, broker) => sum + broker.total, 0)}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Broker</TableHead>
+                      <TableHead>Total Deals</TableHead>
+                      <TableHead>Settled Deals</TableHead>
+                      <TableHead>Settled Rate</TableHead>
+                      <TableHead>Total Value Settled</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {brokers.map((broker) => (
+                      <TableRow key={broker.name}>
+                        <TableCell className="font-medium text-deep-purple-text">{broker.name}</TableCell>
+                        <TableCell className="text-deep-purple-text">{broker.total}</TableCell>
+                        <TableCell className="text-deep-purple-text">{broker.settled}</TableCell>
+                        <TableCell className="text-deep-purple-text">{broker.settledRate}%</TableCell>
+                        <TableCell className="text-deep-purple-text">{formatCurrency(broker.value)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+            <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
+              <CardHeader>
+                <CardTitle className="text-violet">Settlement Analysis</CardTitle>
+                <CardDescription className="text-violet/80">Interactive treemap of settled deals by value. Total settled: {filteredDeals.filter(d => d["6. Settled"] && d["6. Settled"].trim() !== "").length} deals</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <InteractiveTreemap deals={filteredDeals} />
+                <ChartComment chartId="settlement-analysis-treemap" chartTitle="Settlement Analysis Treemap" />
+              </CardContent>
+            </Card>
           </TabsContent>
-          <TabsContent value="pipeline"><Card className="bg-white/60 border-violet/20 shadow-sm mt-4"><CardHeader><CardTitle className="text-violet">Deal Pipeline Flow</CardTitle><CardDescription className="text-violet/80">Visualize the deal flow from lead to settlement or loss. Total deals: {filteredDeals.length}</CardDescription></CardHeader><CardContent><SankeyDiagram deals={filteredDeals} /></CardContent></Card></TabsContent>
+          <TabsContent value="pipeline">
+            <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
+              <CardHeader>
+                <CardTitle className="text-violet">Deal Pipeline Flow</CardTitle>
+                <CardDescription className="text-violet/80">Visualize the deal flow from lead to settlement or loss. Total deals: {filteredDeals.length}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <SankeyDiagram deals={filteredDeals} />
+                <ChartComment chartId="pipeline-sankey-diagram" chartTitle="Pipeline Flow Diagram" />
+              </CardContent>
+            </Card>
+          </TabsContent>
           <TabsContent value="weekly-analysis">
             <WeeklyAnalysis filteredDeals={filteredDeals} allDeals={deals} />
           </TabsContent>
         </Tabs>
-
-        <Card className="bg-white/60 border-violet/20 shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl font-bold text-violet"><Search className="h-5 w-5" />All Deals ({filteredDeals.length} total)</CardTitle>
-            <div className="flex gap-4 pt-4">
-              <Input placeholder="Search by deal or broker..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="max-w-sm bg-violet/10 border-violet/30 text-deep-purple-text" />
-              <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className="w-[180px] bg-violet/10 border-violet/30 text-deep-purple-text"><SelectValue placeholder="Filter by status" /></SelectTrigger><SelectContent>{[{ value: "all", label: "All Statuses" }, ...statusCounts.map(([status]) => ({ value: status, label: status }))].map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent></Select>
-              <Select value={brokerFilter} onValueChange={setBrokerFilter}><SelectTrigger className="w-[180px] bg-violet/10 border-violet/30 text-deep-purple-text"><SelectValue placeholder="Filter by broker" /></SelectTrigger><SelectContent>{[{ value: "all", label: "All Brokers" }, ...brokers.map(b => ({ value: b.name, label: b.name }))].map(b => <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>)}</SelectContent></Select>
-              <Select value={sourceFilter} onValueChange={setSourceFilter}><SelectTrigger className="w-[180px] bg-violet/10 border-violet/30 text-deep-purple-text"><SelectValue placeholder="Filter by source" /></SelectTrigger><SelectContent><SelectItem value="all">All Sources</SelectItem><SelectItem value="rednote">RedNote</SelectItem><SelectItem value="lifex">LifeX</SelectItem><SelectItem value="other">Other</SelectItem></SelectContent></Select>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md border border-violet/20">
-              <Table>
-                <TableHeader><TableRow>
-                  <TableHead><Button variant="ghost" onClick={() => handleSort("deal_name")}>Deal Name {getSortIcon("deal_name")}</Button></TableHead>
-                  <TableHead><Button variant="ghost" onClick={() => handleSort("broker_name")}>Broker {getSortIcon("broker_name")}</Button></TableHead>
-                  <TableHead><Button variant="ghost" onClick={() => handleSort("deal_value")}>Value {getSortIcon("deal_value")}</Button></TableHead>
-                  <TableHead><Button variant="ghost" onClick={() => handleSort("status")}>Status {getSortIcon("status")}</Button></TableHead>
-                  <TableHead><Button variant="ghost" onClick={() => handleSort("source")}>Source {getSortIcon("source")}</Button></TableHead>
-                  <TableHead><Button variant="ghost" onClick={() => handleSort("process_days")}>Process Days {getSortIcon("process_days")}</Button></TableHead>
-                  <TableHead><Button variant="ghost" onClick={() => handleSort("latest_date")}>Latest Update {getSortIcon("latest_date")}</Button></TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {filteredDeals.length > 0 ? (
-                    filteredDeals.map((deal) => (
-                      <TableRow key={deal.deal_id}>
-                        <TableCell className="font-medium text-deep-purple-text">{deal.deal_name}</TableCell>
-                        <TableCell className="text-deep-purple-text">{deal.broker_name}</TableCell>
-                        <TableCell className="text-deep-purple-text">{formatCurrency(deal.deal_value)}</TableCell>
-                                                <TableCell><Badge className={getStatusBadgeClass(getDealDisplayStatus(deal))}>{getDealDisplayStatus(deal)}</Badge></TableCell>
-                        <TableCell className="text-deep-purple-text">{deal["From Rednote?"] === "Yes" ? "RedNote" : deal["From LifeX?"] === "Yes" ? "LifeX" : "Other"}</TableCell>
-                        <TableCell className="text-deep-purple-text">{deal["process days"]}</TableCell>
-                        <TableCell className="text-deep-purple-text">{deal.latest_date ? new Date(deal.latest_date).toLocaleDateString() : "N/A"}</TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow><TableCell colSpan={7} className="h-24 text-center text-deep-purple-text/70">No results found.</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );
