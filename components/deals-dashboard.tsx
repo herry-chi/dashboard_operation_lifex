@@ -26,6 +26,7 @@ import {
   Home,
   Maximize,
   Minimize,
+  BarChart3,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -37,7 +38,8 @@ import { ChartComment } from "@/components/chart-comment"
 import { useFullscreen } from "@/hooks/use-fullscreen"
 import { LoadingAnimation } from "@/components/loading-animation"
 import * as XLSX from "xlsx"
-import Image from "next/image";
+import Image from "next/image"
+import Link from "next/link"
 
 const CHART_COLORS = ["#751FAE", "#EF3C99", "#3CBDE5", "#FF701F", "#FFA31F", "#A0E82A"];
 
@@ -1097,11 +1099,11 @@ export function DealsDashboard() {
 
   if (deals.length === 0 && !isLoading) {
     return (
-      <div className="bg-gradient-to-br from-light-purple-bg to-violet/10 text-deep-purple-text min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      <div className="bg-gradient-to-br from-slate-100 via-purple-50 to-purple-100 text-gray-800 min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
         {/* Background decoration */}
         <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-80 h-80 bg-violet/10 rounded-full blur-3xl"></div>
-          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-hot-pink/10 rounded-full blur-3xl"></div>
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-violet/15 rounded-full blur-3xl"></div>
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-pink-200/40 rounded-full blur-3xl"></div>
         </div>
         
         {/* Large background logo */}
@@ -1222,12 +1224,12 @@ export function DealsDashboard() {
   }
 
   return (
-    <div className="bg-gradient-to-br from-light-purple-bg via-violet/5 to-light-purple-bg text-deep-purple-text min-h-screen font-sans relative overflow-hidden">
+    <div className="bg-gradient-to-br from-slate-100 via-purple-50 to-purple-100 text-gray-800 min-h-screen font-sans relative overflow-hidden">
       {/* Background decorative elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-gradient-to-br from-violet/10 to-hot-pink/10 rounded-full blur-3xl"></div>
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-hot-pink/10 to-violet/10 rounded-full blur-3xl"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial from-violet/5 to-transparent rounded-full blur-2xl"></div>
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-gradient-to-br from-violet/15 to-pink-200/40 rounded-full blur-3xl"></div>
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-pink-200/40 to-violet/15 rounded-full blur-3xl"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial from-purple-100/30 to-transparent rounded-full blur-2xl"></div>
       </div>
 
       {/* Subtle background logo */}
@@ -1264,6 +1266,17 @@ export function DealsDashboard() {
         </div>
 
         <div className="flex items-center gap-3">
+          <Link href="/marketing">
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white/60 border-violet/30 text-violet hover:bg-violet hover:text-white transition-all duration-300 shadow-sm hover:shadow-lg backdrop-blur-sm"
+              title="营销仪表板"
+            >
+              <BarChart3 className="h-4 w-4 mr-2" />
+              营销
+            </Button>
+          </Link>
           {isSupported && (
             <Button
               variant="outline"

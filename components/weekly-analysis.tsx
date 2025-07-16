@@ -80,13 +80,13 @@ const ChangeBadge = ({ value, isRate = false }: { value?: number; isRate?: boole
 };
 
 const MetricDisplay = ({ title, value, change, icon: Icon, isCurrency = false, isRate = false }: { title: string; value: string; change?: number; icon: React.ElementType; isCurrency?: boolean; isRate?: boolean }) => (
-  <div className="flex flex-col p-3 rounded-lg border border-violet-300 shadow-sm" style={{backgroundColor: '#f6f3ff'}}>
-    <div className="flex items-center justify-between text-sm text-gray-700 font-medium">
+  <div className="flex flex-col p-3 rounded-lg border border-violet/20 bg-white/50 shadow-sm">
+    <div className="flex items-center justify-between text-sm text-violet/80 font-medium">
       <span>{title}</span>
-      <Icon className="h-4 w-4" />
+      <Icon className="h-4 w-4 text-violet/70" />
     </div>
     <div className="flex items-baseline space-x-2 mt-1">
-      <span className="text-2xl font-bold text-deep-purple-text">{value}</span>
+      <span className="text-2xl font-bold text-pink-500">{value}</span>
       <ChangeBadge value={change} isRate={isRate} />
     </div>
   </div>
@@ -204,10 +204,10 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
 
   return (
     <div className="space-y-6 mt-4">
-      <Card className="bg-white/95 border-violet/30 shadow-md">
+      <Card className="bg-white/60 border-violet/20 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-deep-purple-text font-bold">Weekly Performance Analysis</CardTitle>
-          <CardDescription className="text-gray-700">
+          <CardTitle className="text-violet">Weekly Performance Analysis</CardTitle>
+          <CardDescription className="text-violet/80">
             A weekly breakdown of key performance metrics. Weekly cards are based on filters. The average is based on all data.
           </CardDescription>
         </CardHeader>
@@ -216,11 +216,17 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
       {weeklyData.length > 0 ? (
         <>
           {averages && (
-            <Card className="border-violet-300 shadow-lg" style={{backgroundColor: '#ede8ff'}}>
-              <CardHeader>
-                <CardTitle className="text-gray-900 font-bold text-lg">Overall Weekly Average (All Time)</CardTitle>
+            <Card className="bg-white/80 border-violet/40 shadow-lg ring-2 ring-violet/15">
+              <CardHeader className="bg-gradient-to-r from-violet/5 to-hot-pink/5 rounded-t-lg">
+                <CardTitle className="text-violet font-bold text-xl flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-hot-pink" />
+                  Overall Weekly Average (All Time)
+                </CardTitle>
+                <CardDescription className="text-violet/80 font-medium">
+                  Baseline performance metrics across all historical data
+                </CardDescription>
               </CardHeader>
-              <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-white/50">
                 <MetricDisplay title="Avg. Total Deals" value={averages.totalDeals.toFixed(1)} icon={FileText} />
                 <MetricDisplay title="Avg. Settled Value" value={formatCurrency(averages.settledValue)} icon={DollarSign} isCurrency />
                 <MetricDisplay title="Avg. Settled Rate" value={`${averages.settledRate.toFixed(1)}%`} icon={TrendingUp} isRate />
@@ -231,9 +237,9 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
 
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {weeklyData.map((stat) => (
-              <Card key={stat.week} className="bg-white/95 border-violet/30 shadow-md hover:shadow-xl transition-shadow duration-300">
+              <Card key={stat.week} className="bg-white/60 border-violet/20 shadow-sm hover:shadow-lg transition-shadow duration-300">
                 <CardHeader>
-                  <CardTitle className="text-deep-purple-text">Week of {stat.week}</CardTitle>
+                  <CardTitle className="text-violet">Week of {stat.week}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <MetricDisplay title="Total Deals" value={stat.totalDeals.toString()} change={stat.totalDealsChange} icon={FileText} />
@@ -246,9 +252,9 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
           </div>
         </>
       ) : (
-        <Card className="bg-white/95 border-violet/30 shadow-md mt-4">
+        <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
             <CardContent className="h-48 flex items-center justify-center">
-                 <p className="text-center text-gray-600 font-medium">No weekly data available for the selected filters.</p>
+                 <p className="text-center text-violet/80 font-medium">No weekly data available for the selected filters.</p>
             </CardContent>
         </Card>
       )}
