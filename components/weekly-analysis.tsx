@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartComment } from "@/components/chart-comment"
 import { ArrowUp, ArrowDown, TrendingUp, Users, DollarSign, FileText } from "lucide-react"
@@ -79,8 +79,13 @@ const ChangeBadge = ({ value, isRate = false }: { value?: number; isRate?: boole
   );
 };
 
-const MetricDisplay = ({ title, value, change, icon: Icon, isCurrency = false, isRate = false }: { title: string; value: string; change?: number; icon: React.ElementType; isCurrency?: boolean; isRate?: boolean }) => (
-  <div className="flex flex-col p-3 rounded-lg border border-violet/20 bg-white/50 shadow-sm">
+const MetricDisplay = ({ title, value, change, icon: Icon, isCurrency = false, isRate = false, onClick, clickable = false }: { title: string; value: string; change?: number; icon: React.ElementType; isCurrency?: boolean; isRate?: boolean; onClick?: () => void; clickable?: boolean }) => (
+  <div 
+    className={`flex flex-col p-3 rounded-lg border border-violet/20 bg-white/50 shadow-sm transition-all duration-200 ${
+      clickable ? 'cursor-pointer hover:shadow-md hover:bg-white/70 hover:border-violet/40' : ''
+    }`}
+    onClick={clickable ? onClick : undefined}
+  >
     <div className="flex items-center justify-between text-sm text-violet/80 font-medium">
       <span>{title}</span>
       <Icon className="h-4 w-4 text-violet/70" />
@@ -146,6 +151,52 @@ const calculateWeeklyStats = (deals: Deal[]): WeeklyStat[] => {
 
 
 export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Deal[], allDeals: Deal[] }) {
+  const [selectedWeekForDetails, setSelectedWeekForDetails] = useState<string | null>(null);
+
+  // Calculate settled deals details for a specific week
+  const getWeekSettledDetails = useMemo(() => {
+    const weeklyGroups = filteredDeals.reduce((acc, deal) => {
+      const dateKey = deal.latest_date || deal["6. Settled"] || deal.created_time;
+      if (dateKey) {
+        try {
+          const weekStartDate = getWeekStartDate(dateKey);
+          if (!acc[weekStartDate]) {
+            acc[weekStartDate] = [];
+          }
+          acc[weekStartDate].push(deal);
+        } catch (e) {
+          console.error(`Invalid date for deal ${deal.deal_id}: ${dateKey}`);
+        }
+      }
+      return acc;
+    }, {} as Record<string, Deal[]>);
+
+    const result: Record<string, { totalSettled: number; sourceDistribution: Array<{ label: string; value: number; color: string }> }> = {};
+    
+    Object.entries(weeklyGroups).forEach(([week, dealsInWeek]) => {
+      const settledDeals = dealsInWeek.filter(d => d["6. Settled"] && d["6. Settled"].trim() !== "");
+      const totalSettled = settledDeals.length;
+      
+      // Calculate source distribution for settled deals
+      const sourceCounts = settledDeals.reduce((acc, deal) => {
+        const isRedNote = deal["From Rednote?"] === "Yes";
+        const isLifeX = deal["From LifeX?"] === "Yes";
+        const source = isRedNote ? "RedNote" : isLifeX ? "LifeX" : "Referral";
+        acc[source] = (acc[source] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const sourceDistribution = [
+        { label: "RedNote", value: sourceCounts["RedNote"] || 0, color: "#EF3C99" }, // CHART_COLORS[1]
+        { label: "LifeX", value: sourceCounts["LifeX"] || 0, color: "#751FAE" }, // CHART_COLORS[0]
+        { label: "Referral", value: sourceCounts["Referral"] || 0, color: "#3CBDE5" }, // CHART_COLORS[2]
+      ].filter(item => item.value > 0);
+
+      result[week] = { totalSettled, sourceDistribution };
+    });
+
+    return result;
+  }, [filteredDeals]);
   const weeklyData = useMemo((): WeeklyStat[] => {
     const stats = calculateWeeklyStats(filteredDeals);
     
@@ -236,19 +287,64 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-            {weeklyData.map((stat) => (
-              <Card key={stat.week} className="bg-white/60 border-violet/20 shadow-sm hover:shadow-lg transition-shadow duration-300">
-                <CardHeader>
-                  <CardTitle className="text-violet">Week of {stat.week}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <MetricDisplay title="Total Deals" value={stat.totalDeals.toString()} change={stat.totalDealsChange} icon={FileText} />
-                  <MetricDisplay title="Settled Value" value={formatCurrency(stat.settledValue)} change={stat.settledValueChange} icon={DollarSign} isCurrency />
-                  <MetricDisplay title="Settled Rate" value={`${stat.settledRate.toFixed(1)}%`} change={stat.settledRateChange} icon={TrendingUp} isRate />
-                  <MetricDisplay title="Conversion Rate" value={`${stat.conversionRate.toFixed(1)}%`} change={stat.conversionRateChange} icon={Users} isRate />
-                </CardContent>
-              </Card>
-            ))}
+            {weeklyData.map((stat) => {
+              const weekDetails = getWeekSettledDetails[stat.week];
+              const isExpanded = selectedWeekForDetails === stat.week;
+              
+              return (
+                <Card key={stat.week} className="bg-white/60 border-violet/20 shadow-sm hover:shadow-lg transition-shadow duration-300">
+                  <CardHeader>
+                    <CardTitle className="text-violet">Week of {stat.week}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <MetricDisplay title="Total Deals" value={stat.totalDeals.toString()} change={stat.totalDealsChange} icon={FileText} />
+                    <MetricDisplay title="Settled Value" value={formatCurrency(stat.settledValue)} change={stat.settledValueChange} icon={DollarSign} isCurrency />
+                    <MetricDisplay 
+                      title="Settled Rate" 
+                      value={`${stat.settledRate.toFixed(1)}%`} 
+                      change={stat.settledRateChange} 
+                      icon={TrendingUp} 
+                      isRate 
+                      clickable={weekDetails && weekDetails.totalSettled > 0}
+                      onClick={() => {
+                        if (weekDetails && weekDetails.totalSettled > 0) {
+                          setSelectedWeekForDetails(isExpanded ? null : stat.week);
+                        }
+                      }}
+                    />
+                    <MetricDisplay title="Conversion Rate" value={`${stat.conversionRate.toFixed(1)}%`} change={stat.conversionRateChange} icon={Users} isRate />
+                    
+                    {/* Expanded details for settled deals */}
+                    {isExpanded && weekDetails && weekDetails.totalSettled > 0 && (
+                      <div className="mt-4 p-3 bg-violet/5 rounded-lg border border-violet/20">
+                        <h4 className="text-sm font-semibold text-violet mb-2">
+                          Settled Deals Breakdown ({weekDetails.totalSettled} total)
+                        </h4>
+                        <div className="space-y-2">
+                          {weekDetails.sourceDistribution.map((source, index) => {
+                            const percentage = weekDetails.totalSettled > 0 ? (source.value / weekDetails.totalSettled) * 100 : 0;
+                            return (
+                              <div key={index} className="flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-2">
+                                  <div 
+                                    className="w-2 h-2 rounded-full" 
+                                    style={{ backgroundColor: source.color }}
+                                  />
+                                  <span className="text-violet/80">{source.label}</span>
+                                </div>
+                                <span className="text-violet/70 font-medium">
+                                  {source.value} ({percentage.toFixed(1)}%)
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </>
       ) : (

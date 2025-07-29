@@ -14,7 +14,8 @@
       "Bash(unzip:*)",
       "Bash(ls:*)",
       "Bash(grep:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(npm run:*)"
     ],
     "deny": []
   }
