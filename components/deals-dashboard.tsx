@@ -457,8 +457,8 @@ function BarChart({ data = [], onBarClick, selectedLabel, subData }: { data?: Ar
               </div>
             </div>
             
-            {/* Sub bars directly below the selected item */}
-            {isSelected && hasSubData && (
+            {/* Sub bars always displayed when available */}
+            {hasSubData && (
               <div className="ml-6 mt-2 space-y-2">
                 {subData[item.label].map((subItem, subIndex) => {
                   const subTotal = subData[item.label].reduce((sum, subItem) => sum + subItem.value, 0);
@@ -1976,11 +1976,6 @@ export function DealsDashboard() {
                         newDealsAllSourcesDistribution.length > 0 ? (
                           <BarChart
                             data={newDealsAllSourcesDistribution}
-                            onBarClick={(label) => {
-                              setSelectedSourceForBrokerChart(label || null);
-                              setSelectedBrokerForSourceChart(null); // Clear broker selection
-                            }}
-                            selectedLabel={selectedSourceForBrokerChart}
                             subData={newDealsBrokerDistributionBySource}
                           />
                         ) : (

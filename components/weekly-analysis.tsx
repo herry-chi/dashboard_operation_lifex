@@ -151,7 +151,6 @@ const calculateWeeklyStats = (deals: Deal[]): WeeklyStat[] => {
 
 
 export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Deal[], allDeals: Deal[] }) {
-  const [selectedWeekForDetails, setSelectedWeekForDetails] = useState<string | null>(null);
 
   // Calculate settled deals details for a specific week
   const getWeekSettledDetails = useMemo(() => {
@@ -289,7 +288,6 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {weeklyData.map((stat) => {
               const weekDetails = getWeekSettledDetails[stat.week];
-              const isExpanded = selectedWeekForDetails === stat.week;
               
               return (
                 <Card key={stat.week} className="bg-white/60 border-violet/20 shadow-sm hover:shadow-lg transition-shadow duration-300">
@@ -305,17 +303,11 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
                       change={stat.settledRateChange} 
                       icon={TrendingUp} 
                       isRate 
-                      clickable={weekDetails && weekDetails.totalSettled > 0}
-                      onClick={() => {
-                        if (weekDetails && weekDetails.totalSettled > 0) {
-                          setSelectedWeekForDetails(isExpanded ? null : stat.week);
-                        }
-                      }}
                     />
                     <MetricDisplay title="Conversion Rate" value={`${stat.conversionRate.toFixed(1)}%`} change={stat.conversionRateChange} icon={Users} isRate />
                     
-                    {/* Expanded details for settled deals */}
-                    {isExpanded && weekDetails && weekDetails.totalSettled > 0 && (
+                    {/* Always show settled deals breakdown when available */}
+                    {weekDetails && weekDetails.totalSettled > 0 && (
                       <div className="mt-4 p-3 bg-violet/5 rounded-lg border border-violet/20">
                         <h4 className="text-sm font-semibold text-violet mb-2">
                           Settled Deals Breakdown ({weekDetails.totalSettled} total)
