@@ -1220,7 +1220,8 @@ export function DealsDashboard() {
   const newDealsStats = useMemo(() => {
     const totalNewDeals = newDeals.length;
     const totalNewValue = newDeals.reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
-    return { totalNewDeals, totalNewValue };
+    const nonZeroDealsCount = newDeals.filter(deal => deal.deal_value && deal.deal_value > 0).length;
+    return { totalNewDeals, totalNewValue, nonZeroDealsCount };
   }, [newDeals]);
 
   const [selectedBrokerForSourceChart, setSelectedBrokerForSourceChart] = useState<string | null>(null);
@@ -1929,6 +1930,7 @@ export function DealsDashboard() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-4xl font-bold text-hot-pink">{formatCurrency(newDealsStats.totalNewValue)}</div>
+                      <div className="text-sm text-violet/70 mt-1">From {newDealsStats.nonZeroDealsCount} Values</div>
                     </CardContent>
                   </Card>
                 </div>
