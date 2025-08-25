@@ -404,7 +404,7 @@ function PieChart({ data = [], size = 200, legendTextColor = "text-deep-purple-t
   );
 }
 
-function BarChart({ data = [], onBarClick, selectedLabel }: { data?: Array<{ label: string; value: number; color: string }>; onBarClick?: (label: string) => void; selectedLabel?: string | null }) {
+function BarChart({ data = [], onBarClick, selectedLabel, subData }: { data?: Array<{ label: string; value: number; color: string }>; onBarClick?: (label: string) => void; selectedLabel?: string | null; subData?: Record<string, Array<{ label: string; value: number; color: string }>> }) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
   if (total === 0) return <div className="flex items-center justify-center h-32"><span className="text-deep-purple-text/70">No data</span></div>;
   
@@ -427,33 +427,70 @@ function BarChart({ data = [], onBarClick, selectedLabel }: { data?: Array<{ lab
         const percentage = total > 0 ? (item.value / total) * 100 : 0;
         const barWidth = maxValue > 0 ? (item.value / maxValue) * 100 : 0;
         const isSelected = selectedLabel === item.label;
+        const hasSubData = subData && subData[item.label] && subData[item.label].length > 0;
         
         return (
-          <div 
-            key={index} 
-            onClick={() => onBarClick && onBarClick(item.label)}
-            className={`space-y-1 ${onBarClick ? 'cursor-pointer' : ''} p-2 rounded-md transition-colors duration-150 ${
-              isSelected ? 'bg-violet/10' : 'hover:bg-violet/5'
-            }`}
-          >
-            <div className="flex justify-between items-center text-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                <span className="text-deep-purple-text font-medium">{item.label}</span>
+          <div key={index}>
+            <div 
+              onClick={() => onBarClick && onBarClick(item.label)}
+              className={`space-y-1 ${onBarClick ? 'cursor-pointer' : ''} p-2 rounded-md transition-colors duration-150 ${
+                isSelected ? 'bg-violet/10' : 'hover:bg-violet/5'
+              }`}
+            >
+              <div className="flex justify-between items-center text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-deep-purple-text font-medium">{item.label}</span>
+                </div>
+                <span className="text-deep-purple-text/80">
+                  {item.value} ({percentage.toFixed(1)}%)
+                </span>
               </div>
-              <span className="text-deep-purple-text/80">
-                {item.value} ({percentage.toFixed(1)}%)
-              </span>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div 
+                  className="h-2 rounded-full transition-all duration-300" 
+                  style={{ 
+                    width: `${barWidth}%`, 
+                    backgroundColor: item.color 
+                  }}
+                />
+              </div>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="h-2 rounded-full transition-all duration-300" 
-                style={{ 
-                  width: `${barWidth}%`, 
-                  backgroundColor: item.color 
-                }}
-              />
-            </div>
+            
+            {/* Sub bars always displayed when available */}
+            {hasSubData && (
+              <div className="ml-6 mt-2 space-y-2">
+                {subData[item.label].map((subItem, subIndex) => {
+                  const subTotal = subData[item.label].reduce((sum, subItem) => sum + subItem.value, 0);
+                  const subPercentage = subTotal > 0 ? (subItem.value / subTotal) * 100 : 0;
+                  const subMaxValue = Math.max(...subData[item.label].map(subItem => subItem.value));
+                  const subBarWidth = subMaxValue > 0 ? (subItem.value / subMaxValue) * 100 : 0;
+                  
+                  return (
+                    <div key={subIndex} className="space-y-1 p-2 rounded-md">
+                      <div className="flex justify-between items-center text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: subItem.color }} />
+                          <span className="text-deep-purple-text/80 text-xs">{subItem.label}</span>
+                        </div>
+                        <span className="text-deep-purple-text/60 text-xs">
+                          {subItem.value} ({subPercentage.toFixed(1)}%)
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div 
+                          className="h-1.5 rounded-full transition-all duration-300" 
+                          style={{ 
+                            width: `${subBarWidth}%`, 
+                            backgroundColor: subItem.color 
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}
@@ -477,8 +514,11 @@ function DoubleRingPieChart({ outerData = [], innerData = [], size = 300 }: { ou
       const x1 = centerX + radius * Math.cos(startAngleRad), y1 = centerY + radius * Math.sin(startAngleRad);
       const x2 = centerX + radius * Math.cos(endAngleRad), y2 = centerY + radius * Math.sin(endAngleRad);
       const textX = centerX + textRadius * Math.cos(midAngleRad), textY = centerY + textRadius * Math.sin(midAngleRad);
-      const largeArcFlag = percentage > 50 ? 1 : 0;
-      const pathData = [`M ${centerX} ${centerY}`, `L ${x1} ${y1}`, `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`, "Z"].join(" ");
+      // For single item (100%), always use large arc to create full circle
+      const largeArcFlag = percentage >= 99.9 ? 1 : (percentage > 50 ? 1 : 0);
+      const pathData = percentage >= 99.9 
+        ? `M ${centerX} ${centerY} L ${centerX} ${centerY - radius} A ${radius} ${radius} 0 1 1 ${centerX - 0.1} ${centerY - radius} Z`
+        : [`M ${centerX} ${centerY}`, `L ${x1} ${y1}`, `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2}`, "Z"].join(" ");
       cumulativePercentage += percentage;
       return { pathData, color: item.color, label: item.label, value: item.value, percentage, textX, textY };
     });
@@ -507,28 +547,28 @@ function DoubleRingPieChart({ outerData = [], innerData = [], size = 300 }: { ou
       <div className="grid grid-cols-2 gap-6 text-sm">
         <div>
           <h4 className="font-semibold mb-2 text-deep-purple-text">Outer Ring - Total Deals</h4>
-          {outerData.map((item, index) => (
+          {outerData.length > 0 ? outerData.map((item, index) => (
             <div key={index} className="flex items-center gap-2 mb-1">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
               <span>{item.label}: {item.value} ({outerTotal > 0 ? ((item.value / outerTotal) * 100).toFixed(1) : "0"}%)</span>
             </div>
-          ))}
+          )) : <span className="text-sm text-deep-purple-text/50">No data</span>}
         </div>
         <div>
           <h4 className="font-semibold mb-2 text-deep-purple-text">Inner Ring - Weekly Avg</h4>
-          {innerData.map((item, index) => (
+          {innerData.length > 0 ? innerData.map((item, index) => (
             <div key={index} className="flex items-center gap-2 mb-1">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
               <span>{item.label}: {item.value.toFixed(1)} ({innerTotal > 0 ? ((item.value / innerTotal) * 100).toFixed(1) : "0"}%)</span>
             </div>
-          ))}
+          )) : <span className="text-sm text-deep-purple-text/50">No data</span>}
         </div>
       </div>
     </div>
   );
 }
 
-function SankeyDiagram({ deals }: { deals: Deal[] }) {
+function SankeyDiagram({ deals, startDate, endDate }: { deals: Deal[]; startDate: string; endDate: string }) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [showLostDeals, setShowLostDeals] = useState(false);
@@ -546,25 +586,148 @@ function SankeyDiagram({ deals }: { deals: Deal[] }) {
     const links: Array<{ source: string; target: string; value: number }> = [];
     stages.forEach((stage) => nodes.push({ id: stage, name: stage, type: "stage" }));
     nodes.push({ id: "Lost", name: "Lost", type: "lost" });
-    const stageProgression = new Map<string, number>(), lostFromStage = new Map<string, number>(), lostReasonCounts = new Map<string, number>();
+    
+    const stageProgression = new Map<string, number>();
+    const lostFromStage = new Map<string, number>();
+    const lostReasonCounts = new Map<string, number>();
+    const stageCounts = new Map<string, number>();
+
+    // Helper function to check if a date is within the range
+    const isDateInRange = (dateStr: string | null | undefined): boolean => {
+      if (!dateStr || dateStr.trim() === "") return false;
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return false;
+      
+      // If no date filters are set, include all dates
+      if (!startDate && !endDate) return true;
+      
+      // Parse dates and compare using date strings to avoid timezone issues
+      const dateOnlyStr = date.toISOString().split('T')[0];
+      const startDateStr = startDate ? new Date(startDate + 'T00:00:00').toISOString().split('T')[0] : null;
+      const endDateStr = endDate ? new Date(endDate + 'T23:59:59').toISOString().split('T')[0] : null;
+      
+      if (startDateStr && endDateStr) {
+        return dateOnlyStr >= startDateStr && dateOnlyStr <= endDateStr;
+      } else if (startDateStr) {
+        return dateOnlyStr >= startDateStr;
+      } else if (endDateStr) {
+        return dateOnlyStr <= endDateStr;
+      }
+      return true;
+    };
+
+    // Define stage order
+    const stageOrder: Record<string, number> = {
+      "Enquiry Leads": 1,
+      "Opportunity": 2,
+      "1. Application": 3,
+      "2. Assessment": 4,
+      "3. Approval": 5,
+      "4. Loan Document": 6,
+      "5. Settlement Queue": 7,
+      "6. Settled": 8
+    };
 
     deals.forEach((deal) => {
-      let currentStage = ""; const reachedStages: string[] = [];
-      stages.forEach((stage) => { const stageKey = stage as keyof Deal; if (deal[stageKey] && deal[stageKey]!.toString().trim() !== "") { reachedStages.push(stage); currentStage = stage } });
-      if (deal.status === "Lost") {
-        const lostFromProcess = deal["which process (if lost)"]; let lostStage = "Enquiry Leads";
-        if (lostFromProcess) { const processStageMap: Record<string, string> = { "Enquiry Leads": "Enquiry Leads", Opportunity: "Opportunity", Application: "1. Application", Assessment: "2. Assessment", Approval: "3. Approval", "Loan Document": "4. Loan Document", "Settlement Queue": "5. Settlement Queue", Settled: "6. Settled" }; lostStage = processStageMap[lostFromProcess] || lostFromProcess }
-        else if (currentStage) lostStage = currentStage;
-        const lostKey = `${lostStage}->Lost`; lostFromStage.set(lostKey, (lostFromStage.get(lostKey) || 0) + 1);
-        if (deal["lost reason"]) lostReasonCounts.set(deal["lost reason"], (lostReasonCounts.get(deal["lost reason"]) || 0) + 1);
-      } else {
-        for (let i = 0; i < reachedStages.length - 1; i++) { const from = reachedStages[i], to = reachedStages[i + 1], key = `${from}->${to}`; stageProgression.set(key, (stageProgression.get(key) || 0) + 1) }
+      // Find all stages for this deal and their dates
+      const allStages: { stage: string; date: Date; order: number }[] = [];
+      
+      stages.forEach((stage) => {
+        const stageKey = stage as keyof Deal;
+        const stageDate = deal[stageKey];
+        if (stageDate && stageDate.toString().trim() !== "") {
+          const date = new Date(stageDate.toString());
+          if (!isNaN(date.getTime())) {
+            allStages.push({ 
+              stage, 
+              date, 
+              order: stageOrder[stage] || 999 
+            });
+          }
+        }
+      });
+
+      // Sort by stage order (business process order)
+      allStages.sort((a, b) => a.order - b.order);
+
+      // Count stages that have dates within the range
+      allStages.forEach(({ stage, date }) => {
+        if (isDateInRange(date.toISOString())) {
+          stageCounts.set(stage, (stageCounts.get(stage) || 0) + 1);
+        }
+      });
+
+      // Find stage transitions that occur within the date range
+      for (let i = 0; i < allStages.length - 1; i++) {
+        const currentStage = allStages[i];
+        const nextStage = allStages[i + 1];
+        
+        // Check if the transition to the next stage happens within the date range
+        if (isDateInRange(nextStage.date.toISOString())) {
+          const key = `${currentStage.stage}->${nextStage.stage}`;
+          stageProgression.set(key, (stageProgression.get(key) || 0) + 1);
+        }
+      }
+
+      // Handle Lost deals
+      if (deal.status === "Lost" && deal["Lost date"] && isDateInRange(deal["Lost date"])) {
+        const lostFromProcess = deal["which process (if lost)"];
+        let lostStage = "Enquiry Leads";
+        
+        if (lostFromProcess) {
+          const processStageMap: Record<string, string> = {
+            "Enquiry Leads": "Enquiry Leads",
+            Opportunity: "Opportunity",
+            Application: "1. Application",
+            Assessment: "2. Assessment",
+            Approval: "3. Approval",
+            "Loan Document": "4. Loan Document",
+            "Settlement Queue": "5. Settlement Queue",
+            Settled: "6. Settled"
+          };
+          lostStage = processStageMap[lostFromProcess] || lostFromProcess;
+        } else if (allStages.length > 0) {
+          // Use the last completed stage as the lost stage
+          lostStage = allStages[allStages.length - 1].stage;
+        }
+        
+        const lostKey = `${lostStage}->Lost`;
+        lostFromStage.set(lostKey, (lostFromStage.get(lostKey) || 0) + 1);
+        
+        if (deal["lost reason"]) {
+          lostReasonCounts.set(deal["lost reason"], (lostReasonCounts.get(deal["lost reason"]) || 0) + 1);
+        }
+        
+        // Count Lost stage
+        stageCounts.set("Lost", (stageCounts.get("Lost") || 0) + 1);
       }
     });
-    stageProgression.forEach((value, key) => { const [source, target] = key.split("->"); links.push({ source, target, value }) });
-    lostFromStage.forEach((value, key) => { const [source, target] = key.split("->"); links.push({ source, target, value }) });
-    return { nodes, links, lostReasonCounts };
-  }, [deals]);
+
+    // Update node values to show counts
+    const nodeValues = new Map<string, number>();
+    stageCounts.forEach((count, stage) => {
+      nodeValues.set(stage, count);
+    });
+
+    // Create a consolidated links map first
+    const linkMap = new Map<string, number>();
+    
+    stageProgression.forEach((value, key) => {
+      linkMap.set(key, (linkMap.get(key) || 0) + value);
+    });
+    
+    lostFromStage.forEach((value, key) => {
+      linkMap.set(key, (linkMap.get(key) || 0) + value);
+    });
+    
+    // Convert to links array
+    linkMap.forEach((value, key) => {
+      const [source, target] = key.split("->");
+      links.push({ source, target, value });
+    });
+
+    return { nodes, links, lostReasonCounts, nodeValues };
+  }, [deals, startDate, endDate]);
 
   const lostReasonsData = useMemo(() => {
     const data = Array.from(sankeyData.lostReasonCounts.entries()).map(([reason, count], index) => ({
@@ -582,9 +745,8 @@ function SankeyDiagram({ deals }: { deals: Deal[] }) {
     const { nodes, links } = sankeyData;
     const stageNodes = nodes.filter((n) => n.type === "stage"), lostNode = nodes.find((n) => n.id === "Lost");
     const nodePositions = new Map<string, { x: number; y: number; height: number }>();
-    const nodeValues = new Map<string, number>();
-    links.forEach((link) => { nodeValues.set(link.source, (nodeValues.get(link.source) || 0) + link.value); nodeValues.set(link.target, (nodeValues.get(link.target) || 0) + link.value) });
-    const stageWidth = (width - 300) / (stageNodes.length - 1), maxStageValue = Math.max(...stageNodes.map((n) => nodeValues.get(n.id) || 0));
+    const nodeValues = sankeyData.nodeValues || new Map<string, number>();
+    const stageWidth = (width - 300) / (stageNodes.length - 1), maxStageValue = Math.max(1, ...stageNodes.map((n) => nodeValues.get(n.id) || 0));
     
     // Adjusted y-positioning to reduce top margin
     stageNodes.forEach((node, index) => { 
@@ -605,29 +767,66 @@ function SankeyDiagram({ deals }: { deals: Deal[] }) {
     }
 
     const createPath = (x1: number, y1: number, x2: number, y2: number, offset = 0) => { const midX = (x1 + x2) / 2, controlX1 = x1 + (midX - x1) * 0.8, controlX2 = x2 - (x2 - midX) * 0.8; return `M ${x1} ${y1 + offset} C ${controlX1} ${y1 + offset} ${controlX2} ${y2 + offset} ${x2} ${y2 + offset}` };
-    const linksBySource = new Map<string, Array<{ target: string; value: number; index: number }>>();
-    links.forEach((link, index) => { if (!linksBySource.has(link.source)) linksBySource.set(link.source, []); linksBySource.get(link.source)!.push({ target: link.target, value: link.value, index }) });
+    
+    const linksBySource = new Map<string, Array<{ target: string; value: number }>>();
+    links.forEach((link) => { 
+      if (!linksBySource.has(link.source)) linksBySource.set(link.source, []); 
+      linksBySource.get(link.source)!.push({ target: link.target, value: link.value });
+    });
+    
+    // Debug: Check for duplicates in linksBySource
+    console.log('All links:', links);
+    linksBySource.forEach((targets, source) => {
+      if (source === "Opportunity") {
+        console.log(`Source ${source} targets:`, targets);
+      }
+    });
+    
 
     return (
       <div className="w-full overflow-x-auto relative h-[55vh]">
         <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" className="border rounded-lg bg-white/70">
           <defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" strokeWidth="1" /></pattern></defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
-          {Array.from(linksBySource.entries()).map(([source, targets]) => {
-            const sourcePos = nodePositions.get(source); if (!sourcePos) return null;
+          {Array.from(linksBySource.entries()).flatMap(([source, targets]) => {
+            const sourcePos = nodePositions.get(source); 
+            if (!sourcePos) return [];
+            
             const sortedTargets = targets.sort((a, b) => (nodePositions.get(a.target)?.y || 0) - (nodePositions.get(b.target)?.y || 0));
+            
             return sortedTargets.map((target, targetIndex) => {
-              const targetPos = nodePositions.get(target.target); if (!targetPos) return null;
-              const x1 = sourcePos.x + nodeWidth, y1 = sourcePos.y + sourcePos.height / 2, x2 = targetPos.x, y2 = targetPos.y + targetPos.height / 2;
-              const totalTargets = sortedTargets.length, offsetRange = Math.min(sourcePos.height, 40), offset = totalTargets > 1 ? (targetIndex - (totalTargets - 1) / 2) * (offsetRange / Math.max(1, totalTargets - 1)) : 0;
-              const strokeWidth = Math.max(1, Math.min(15, target.value * 1.5)), isLostLink = target.target.includes("Lost"), color = isLostLink ? "#9CA3AF" : "#751FAE", opacity = isLostLink ? 0.7 : 0.6;
+              const targetPos = nodePositions.get(target.target); 
+              if (!targetPos) return null;
+              
+              const x1 = sourcePos.x + nodeWidth;
+              const y1 = sourcePos.y + sourcePos.height / 2;
+              const x2 = targetPos.x;
+              const y2 = targetPos.y + targetPos.height / 2;
+              const totalTargets = sortedTargets.length;
+              const offsetRange = Math.min(sourcePos.height, 40);
+              const offset = totalTargets > 1 ? (targetIndex - (totalTargets - 1) / 2) * (offsetRange / Math.max(1, totalTargets - 1)) : 0;
+              const strokeWidth = Math.max(1, Math.min(15, target.value * 1.5));
+              const isLostLink = target.target.includes("Lost");
+              const color = isLostLink ? "#9CA3AF" : "#751FAE";
+              const opacity = isLostLink ? 0.7 : 0.6;
+              
               return (
-                <g key={`${source}-${target.target}-${target.index}`}>
+                <g key={`${source}-${target.target}-${targetIndex}`}>
                   <path d={createPath(x1, y1, x2, y2, offset)} stroke={color} strokeWidth={strokeWidth} fill="none" opacity={opacity} />
-                  {target.value > 0 && strokeWidth > 3 && <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + offset - 8} textAnchor="middle" className="text-xs font-medium fill-deep-purple-text" style={{ textShadow: "1px 1px 2px white" }}>{target.value}</text>}
+                  {target.value > 0 && (
+                    <text 
+                      x={(x1 + x2) / 2} 
+                      y={(y1 + y2) / 2 + offset - 8} 
+                      textAnchor="middle" 
+                      className="text-xs font-medium fill-deep-purple-text" 
+                      style={{ textShadow: "1px 1px 2px white, -1px -1px 2px white, 1px -1px 2px white, -1px 1px 2px white" }}
+                    >
+                      {target.value}
+                    </text>
+                  )}
                 </g>
               );
-            });
+            }).filter(Boolean);
           })}
           {nodes.map((node) => {
             const pos = nodePositions.get(node.id); if (!pos) return null;
@@ -927,7 +1126,12 @@ export function DealsDashboard() {
 
   const brokerDistributionData = useMemo(() => {
     const outerData = brokers.slice(0, 10).map((broker, index) => ({ label: broker.name, value: broker.total, color: CHART_COLORS[index % CHART_COLORS.length] }));
-    const innerData = brokers.slice(0, 10).map((broker, index) => ({ label: broker.name, value: brokerWeeklyAverage[broker.name] || 0, color: CHART_COLORS[index % CHART_COLORS.length] }));
+    // Inner ring shows all brokers' weekly average (not filtered by time)
+    const allBrokersByWeeklyAvg = Object.entries(brokerWeeklyAverage)
+      .map(([name, avg]) => ({ name, avg }))
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, 10);
+    const innerData = allBrokersByWeeklyAvg.map((broker, index) => ({ label: broker.name, value: broker.avg, color: CHART_COLORS[index % CHART_COLORS.length] }));
     return { outerData, innerData };
   }, [brokers, brokerWeeklyAverage]);
 
@@ -940,7 +1144,7 @@ export function DealsDashboard() {
     const rednoteCount = filteredDeals.filter((d) => d["From Rednote?"] === "Yes").length;
     const lifexCount = filteredDeals.filter((d) => d["From LifeX?"] === "Yes").length;
     const otherCount = filteredDeals.filter((d) => d["From Rednote?"] === "No" && d["From LifeX?"] === "No").length;
-    return [{ label: "RedNote", value: rednoteCount, color: CHART_COLORS[0] }, { label: "LifeX", value: lifexCount, color: CHART_COLORS[1] }, { label: "Other Sources", value: otherCount, color: CHART_COLORS[2] }].filter((item) => item.value > 0);
+    return [{ label: "RedNote", value: rednoteCount, color: CHART_COLORS[1] }, { label: "LifeX", value: lifexCount, color: CHART_COLORS[0] }, { label: "Referral", value: otherCount, color: CHART_COLORS[2] }].filter((item) => item.value > 0);
   }, [filteredDeals]);
 
   const newDeals = useMemo(() => {
@@ -1016,10 +1220,12 @@ export function DealsDashboard() {
   const newDealsStats = useMemo(() => {
     const totalNewDeals = newDeals.length;
     const totalNewValue = newDeals.reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
-    return { totalNewDeals, totalNewValue };
+    const nonZeroDealsCount = newDeals.filter(deal => deal.deal_value && deal.deal_value > 0).length;
+    return { totalNewDeals, totalNewValue, nonZeroDealsCount };
   }, [newDeals]);
 
   const [selectedBrokerForSourceChart, setSelectedBrokerForSourceChart] = useState<string | null>(null);
+  const [selectedSourceForBrokerChart, setSelectedSourceForBrokerChart] = useState<string | null>(null);
 
   const newDealsBrokerDistribution = useMemo(() => {
     const brokerCounts = newDeals.reduce((acc, deal) => {
@@ -1069,11 +1275,42 @@ export function DealsDashboard() {
     }, {} as Record<string, number>);
 
     return [
-      { label: "RED", value: sourceCounts["RED"] || 0, color: CHART_COLORS[0] },
-      { label: "LIFEX", value: sourceCounts["LIFEX"] || 0, color: CHART_COLORS[1] },
+      { label: "RED", value: sourceCounts["RED"] || 0, color: CHART_COLORS[1] },
+      { label: "LIFEX", value: sourceCounts["LIFEX"] || 0, color: CHART_COLORS[0] },
       { label: "REFERRAL", value: sourceCounts["REFERRAL"] || 0, color: CHART_COLORS[2] },
     ].filter(item => item.value > 0);
   }, [newDeals]);
+
+  // Calculate broker distribution for each source
+  const newDealsBrokerDistributionBySource = useMemo(() => {
+    const sourceBrokerCounts: Record<string, Record<string, number>> = {};
+
+    newDeals.forEach(deal => {
+      const source = deal["From Rednote?"] === "Yes" ? "RED" : deal["From LifeX?"] === "Yes" ? "LIFEX" : "REFERRAL";
+      const brokerName = deal.broker_name;
+
+      if (!sourceBrokerCounts[source]) {
+        sourceBrokerCounts[source] = {};
+      }
+      sourceBrokerCounts[source][brokerName] = (sourceBrokerCounts[source][brokerName] || 0) + 1;
+    });
+
+    const result: Record<string, Array<{ label: string; value: number; color: string }>> = {};
+    Object.entries(sourceBrokerCounts).forEach(([source, brokerCounts]) => {
+      // Find the color of the source from the main distribution
+      const sourceColor = newDealsAllSourcesDistribution.find(item => item.label === source)?.color || CHART_COLORS[0];
+      
+      result[source] = Object.entries(brokerCounts)
+        .map(([brokerName, count]) => ({
+          label: brokerName,
+          value: count,
+          color: sourceColor, // Use the same color as the parent source
+        }))
+        .sort((a, b) => b.value - a.value);
+    });
+
+    return result;
+  }, [newDeals, newDealsAllSourcesDistribution]);
 
   const newDealsStatusDistribution = useMemo(() => {
     const statusCounts = newDeals.reduce((acc, deal) => {
@@ -1431,17 +1668,17 @@ export function DealsDashboard() {
 
           <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-xl shadow-violet/10 ring-1 ring-violet/20 hover:shadow-2xl hover:ring-violet/30 transition-all duration-300 group">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-              <CardTitle className="text-sm font-bold text-gray-700">Settled Rate</CardTitle>
-              <div className="p-2 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg group-hover:from-green-200 group-hover:to-emerald-200 transition-all duration-300">
-                <TrendingUp className="h-4 w-4 text-green-600" />
+              <CardTitle className="text-sm font-bold text-gray-700">Conversion Rate</CardTitle>
+              <div className="p-2 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-lg group-hover:from-blue-200 group-hover:to-indigo-200 transition-all duration-300">
+                <Users className="h-4 w-4 text-blue-600" />
               </div>
             </CardHeader>
             <CardContent>
               <div className="text-4xl font-black bg-gradient-to-r from-purple-700 to-pink-600 bg-clip-text text-transparent mb-2">
-                {stats.settledRate}%
+                {stats.conversionRate}%
               </div>
               <p className="text-xs text-gray-600 font-semibold">
-                {stats.settledCount} of {stats.totalDeals} deals settled
+                {stats.convertedCount} of {stats.totalDeals} deals converted
               </p>
             </CardContent>
           </Card>
@@ -1464,17 +1701,17 @@ export function DealsDashboard() {
 
           <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-xl shadow-violet/10 ring-1 ring-violet/20 hover:shadow-2xl hover:ring-violet/30 transition-all duration-300 group">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-              <CardTitle className="text-sm font-bold text-gray-700">Conversion Rate</CardTitle>
-              <div className="p-2 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-lg group-hover:from-blue-200 group-hover:to-indigo-200 transition-all duration-300">
-                <Users className="h-4 w-4 text-blue-600" />
+              <CardTitle className="text-sm font-bold text-gray-700">Settled Rate</CardTitle>
+              <div className="p-2 bg-gradient-to-r from-green-100 to-emerald-100 rounded-lg group-hover:from-green-200 group-hover:to-emerald-200 transition-all duration-300">
+                <TrendingUp className="h-4 w-4 text-green-600" />
               </div>
             </CardHeader>
             <CardContent>
               <div className="text-4xl font-black bg-gradient-to-r from-purple-700 to-pink-600 bg-clip-text text-transparent mb-2">
-                {stats.conversionRate}%
+                {stats.settledRate}%
               </div>
               <p className="text-xs text-gray-600 font-semibold">
-                {stats.convertedCount} of {stats.totalDeals} deals converted
+                {stats.settledCount} of {stats.totalDeals} deals settled
               </p>
             </CardContent>
           </Card>
@@ -1693,6 +1930,7 @@ export function DealsDashboard() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-4xl font-bold text-hot-pink">{formatCurrency(newDealsStats.totalNewValue)}</div>
+                      <div className="text-sm text-violet/70 mt-1">From {newDealsStats.nonZeroDealsCount} Values</div>
                     </CardContent>
                   </Card>
                 </div>
@@ -1705,7 +1943,10 @@ export function DealsDashboard() {
                     <CardContent>
                       <BarChart
                         data={newDealsBrokerDistribution}
-                        onBarClick={(label) => setSelectedBrokerForSourceChart(label || null)}
+                        onBarClick={(label) => {
+                          setSelectedBrokerForSourceChart(label || null);
+                          setSelectedSourceForBrokerChart(null); // Clear source selection
+                        }}
                         selectedLabel={selectedBrokerForSourceChart}
                       />
                       <ChartComment chartId="new-deals-by-broker" chartTitle="New Deals by Broker" />
@@ -1737,6 +1978,7 @@ export function DealsDashboard() {
                         newDealsAllSourcesDistribution.length > 0 ? (
                           <BarChart
                             data={newDealsAllSourcesDistribution}
+                            subData={newDealsBrokerDistributionBySource}
                           />
                         ) : (
                           <div className="flex items-center justify-center h-32 text-deep-purple-text/70">
@@ -1873,7 +2115,7 @@ export function DealsDashboard() {
                 <CardDescription className="text-violet/80">Visualize the deal flow from lead to settlement or loss. Total deals: {filteredDeals.length}</CardDescription>
               </CardHeader>
               <CardContent>
-                <SankeyDiagram deals={filteredDeals} />
+                <SankeyDiagram deals={filteredDeals} startDate={startDate} endDate={endDate} />
                 <ChartComment chartId="pipeline-sankey-diagram" chartTitle="Pipeline Flow Diagram" />
               </CardContent>
             </Card>
