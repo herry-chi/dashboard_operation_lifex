@@ -404,7 +404,7 @@ function PieChart({ data = [], size = 200, legendTextColor = "text-deep-purple-t
   );
 }
 
-function BarChart({ data = [], onBarClick, selectedLabel, subData }: { data?: Array<{ label: string; value: number; color: string }>; onBarClick?: (label: string) => void; selectedLabel?: string | null; subData?: Record<string, Array<{ label: string; value: number; color: string }>> }) {
+function BarChart({ data = [], onBarClick, selectedLabel, subData, showPercentage = true }: { data?: Array<{ label: string; value: number; color: string }>; onBarClick?: (label: string) => void; selectedLabel?: string | null; subData?: Record<string, Array<{ label: string; value: number; color: string }>>; showPercentage?: boolean }) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
   if (total === 0) return <div className="flex items-center justify-center h-32"><span className="text-deep-purple-text/70">No data</span></div>;
   
@@ -443,7 +443,7 @@ function BarChart({ data = [], onBarClick, selectedLabel, subData }: { data?: Ar
                   <span className="text-deep-purple-text font-medium">{item.label}</span>
                 </div>
                 <span className="text-deep-purple-text/80">
-                  {item.value} ({percentage.toFixed(1)}%)
+                  {showPercentage ? `${item.value} (${percentage.toFixed(1)}%)` : item.value}
                 </span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -947,10 +947,10 @@ export function DealsDashboard() {
   const [sourceFilter, setSourceFilter] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [sortField, setSortField] = useState<SortField | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
-  const [newDealsSortField, setNewDealsSortField] = useState<SortField | null>(null);
-  const [newDealsSortDirection, setNewDealsSortDirection] = useState<SortDirection>(null);
+  const [sortField, setSortField] = useState<SortField | null>("status");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [newDealsSortField, setNewDealsSortField] = useState<SortField | null>("status");
+  const [newDealsSortDirection, setNewDealsSortDirection] = useState<SortDirection>("asc");
   
   const { isFullscreen, isSupported, toggleFullscreen } = useFullscreen();
 
@@ -1084,7 +1084,27 @@ export function DealsDashboard() {
           case "deal_name": aValue = a.deal_name || ""; bValue = b.deal_name || ""; break;
           case "broker_name": aValue = a.broker_name || ""; bValue = b.broker_name || ""; break;
           case "deal_value": aValue = a.deal_value || 0; bValue = b.deal_value || 0; break;
-          case "status": aValue = a.status || ""; bValue = b.status || ""; break;
+          case "status": 
+            // Use predefined status order for sorting
+            const statusOrder = [
+              "Enquiry Leads",
+              "Opportunity", 
+              "1. Application",
+              "2. Assessment",
+              "3. Approval",
+              "4. Loan Document",
+              "5. Settlement Queue",
+              "6. Settled",
+              "Lost"
+            ];
+            const aStatus = getDealDisplayStatus(a);
+            const bStatus = getDealDisplayStatus(b);
+            aValue = statusOrder.indexOf(aStatus);
+            bValue = statusOrder.indexOf(bStatus);
+            // If status not found in order, put it at the end
+            if (aValue === -1) aValue = 999;
+            if (bValue === -1) bValue = 999;
+            break;
           case "source": aValue = a["From Rednote?"] === "Yes" ? "RedNote" : a["From LifeX?"] === "Yes" ? "LifeX" : "Other"; bValue = b["From Rednote?"] === "Yes" ? "RedNote" : b["From LifeX?"] === "Yes" ? "LifeX" : "Other"; break;
           case "process_days": aValue = a["process days"] || 0; bValue = b["process days"] || 0; break;
           case "latest_date": aValue = a.latest_date ? new Date(a.latest_date).getTime() : 0; bValue = b.latest_date ? new Date(b.latest_date).getTime() : 0; break;
@@ -1097,7 +1117,7 @@ export function DealsDashboard() {
       });
     }
     return filtered;
-  }, [deals, searchTerm, statusFilter, brokerFilter, sourceFilter, startDate, endDate, sortField, sortDirection]);
+  }, [deals, searchTerm, statusFilter, brokerFilter, sourceFilter, startDate, endDate, sortField, sortDirection, getDealDisplayStatus]);
 
   const stats = useMemo(() => {
     const totalDeals = filteredDeals.length;
@@ -1125,20 +1145,54 @@ export function DealsDashboard() {
   }, [deals]);
 
   const brokerDistributionData = useMemo(() => {
-    const outerData = brokers.slice(0, 10).map((broker, index) => ({ label: broker.name, value: broker.total, color: CHART_COLORS[index % CHART_COLORS.length] }));
-    // Inner ring shows all brokers' weekly average (not filtered by time)
-    const allBrokersByWeeklyAvg = Object.entries(brokerWeeklyAverage)
-      .map(([name, avg]) => ({ name, avg }))
-      .sort((a, b) => b.avg - a.avg)
-      .slice(0, 10);
-    const innerData = allBrokersByWeeklyAvg.map((broker, index) => ({ label: broker.name, value: broker.avg, color: CHART_COLORS[index % CHART_COLORS.length] }));
+    // Calculate all brokers' total deals from all time (unfiltered)
+    const allTimeBrokerStats = deals.reduce((acc, deal) => {
+      acc[deal.broker_name] = (acc[deal.broker_name] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    // Outer ring: filtered time period deals (what currently shows in brokers)
+    const outerData = brokers.slice(0, 10).map((broker, index) => ({ 
+      label: broker.name, 
+      value: broker.total, // Filtered time period deals count
+      color: CHART_COLORS[index % CHART_COLORS.length] 
+    }));
+    
+    // Inner ring: same broker names but showing their all-time totals
+    const innerData = brokers.slice(0, 10).map((broker, index) => ({ 
+      label: broker.name, 
+      value: allTimeBrokerStats[broker.name] || 0, // All-time total
+      color: CHART_COLORS[index % CHART_COLORS.length] 
+    }));
+    
     return { outerData, innerData };
-  }, [brokers, brokerWeeklyAverage]);
+  }, [brokers, deals]);
 
   const statusCounts = useMemo(() => {
-    const counts = filteredDeals.reduce((acc, deal) => { if (deal.status) acc[deal.status] = (acc[deal.status] || 0) + 1; return acc }, {} as Record<string, number>);
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, [filteredDeals]);
+    const counts = filteredDeals.reduce((acc, deal) => { 
+      const displayStatus = getDealDisplayStatus(deal);
+      if (displayStatus) acc[displayStatus] = (acc[displayStatus] || 0) + 1; 
+      return acc;
+    }, {} as Record<string, number>);
+    
+    // Define the correct order
+    const statusOrder = [
+      "Enquiry Leads",
+      "Opportunity", 
+      "1. Application",
+      "2. Assessment",
+      "3. Approval",
+      "4. Loan Document",
+      "5. Settlement Queue",
+      "6. Settled",
+      "Lost"
+    ];
+    
+    // Sort by the predefined order
+    return statusOrder
+      .filter(status => counts[status] > 0)
+      .map(status => [status, counts[status]] as [string, number]);
+  }, [filteredDeals, getDealDisplayStatus]);
 
   const leadSourcesData = useMemo(() => {
     const rednoteCount = filteredDeals.filter((d) => d["From Rednote?"] === "Yes").length;
@@ -1189,8 +1243,25 @@ export function DealsDashboard() {
             bValue = b.deal_value || 0;
             break;
           case "status":
-            aValue = getDealDisplayStatus(a);
-            bValue = getDealDisplayStatus(b);
+            // Use predefined status order for sorting
+            const statusOrder = [
+              "Enquiry Leads",
+              "Opportunity", 
+              "1. Application",
+              "2. Assessment",
+              "3. Approval",
+              "4. Loan Document",
+              "5. Settlement Queue",
+              "6. Settled",
+              "Lost"
+            ];
+            const aStatus = getDealDisplayStatus(a);
+            const bStatus = getDealDisplayStatus(b);
+            aValue = statusOrder.indexOf(aStatus);
+            bValue = statusOrder.indexOf(bStatus);
+            // If status not found in order, put it at the end
+            if (aValue === -1) aValue = 999;
+            if (bValue === -1) bValue = 999;
             break;
           case "source":
             aValue = a["From Rednote?"] === "Yes" ? "RedNote" : a["From LifeX?"] === "Yes" ? "LifeX" : "Other";
@@ -1222,6 +1293,96 @@ export function DealsDashboard() {
     const totalNewValue = newDeals.reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
     const nonZeroDealsCount = newDeals.filter(deal => deal.deal_value && deal.deal_value > 0).length;
     return { totalNewDeals, totalNewValue, nonZeroDealsCount };
+  }, [newDeals]);
+
+  const newDealsConversionStats = useMemo(() => {
+    if (newDeals.length === 0) {
+      return {
+        conversionData: [],
+        conversionCount: 0,
+        settledCount: 0,
+        lostCount: 0
+      };
+    }
+
+    // Check for settled deals first (6. Settled)
+    const settledDeals = newDeals.filter(deal => 
+      deal["6. Settled"] && String(deal["6. Settled"]).trim() !== ""
+    );
+    const settledCount = settledDeals.length;
+
+    // Check for lost deals
+    const lostDeals = newDeals.filter(deal => deal.status === "Lost");
+    const lostCount = lostDeals.length;
+
+    // Check for conversion stages (1. Application, 2. Assessment, 3. Approval, 4. Loan Document, 5. Settlement Queue)
+    // Exclude deals that are already settled or lost
+    const conversionStages = ["1. Application", "2. Assessment", "3. Approval", "4. Loan Document", "5. Settlement Queue"];
+    const conversionDeals = newDeals.filter(deal => {
+      // Skip if deal is already settled or lost
+      if (deal["6. Settled"] && String(deal["6. Settled"]).trim() !== "") return false;
+      if (deal.status === "Lost") return false;
+      
+      // Check if deal has any conversion stage data
+      return conversionStages.some(stage => deal[stage as keyof Deal] && String(deal[stage as keyof Deal]).trim() !== "");
+    });
+    const conversionCount = conversionDeals.length;
+
+    // Create data for horizontal bar chart
+    const conversionData = [
+      { label: "Conversion (excl. Settled)", value: conversionCount, color: "#3B82F6" }, // blue
+      { label: "Settled", value: settledCount, color: "#10B981" }, // green
+      { label: "Lost", value: lostCount, color: "#EF4444" } // red
+    ].filter(item => item.value > 0); // Only show categories with data
+
+    return { conversionData, conversionCount, settledCount, lostCount };
+  }, [newDeals]);
+
+  const newDealsWithValueStats = useMemo(() => {
+    // Filter deals that have value > 0
+    const dealsWithValue = newDeals.filter(deal => deal.deal_value && deal.deal_value > 0);
+    
+    if (dealsWithValue.length === 0) {
+      return {
+        valueStatusData: [],
+        totalWithValue: 0
+      };
+    }
+
+    // Check for settled deals with value
+    const settledWithValue = dealsWithValue.filter(deal => 
+      deal["6. Settled"] && String(deal["6. Settled"]).trim() !== ""
+    ).length;
+
+    // Check for lost deals with value
+    const lostWithValue = dealsWithValue.filter(deal => deal.status === "Lost").length;
+
+    // Check for conversion deals with value (exclude settled and lost)
+    const conversionStages = ["1. Application", "2. Assessment", "3. Approval", "4. Loan Document", "5. Settlement Queue"];
+    const conversionWithValue = dealsWithValue.filter(deal => {
+      // Skip if deal is already settled or lost
+      if (deal["6. Settled"] && String(deal["6. Settled"]).trim() !== "") return false;
+      if (deal.status === "Lost") return false;
+      
+      // Check if deal has any conversion stage data
+      return conversionStages.some(stage => deal[stage as keyof Deal] && String(deal[stage as keyof Deal]).trim() !== "");
+    }).length;
+
+    // Calculate remaining deals (not in any category above)
+    const remainingWithValue = dealsWithValue.length - settledWithValue - lostWithValue - conversionWithValue;
+
+    // Create data for chart
+    const valueStatusData = [
+      { label: "Conversion (excl. Settled)", value: conversionWithValue, color: "#3B82F6" },
+      { label: "Settled", value: settledWithValue, color: "#10B981" },
+      { label: "Lost", value: lostWithValue, color: "#EF4444" },
+      { label: "No Status", value: remainingWithValue, color: "#6B7280" }
+    ].filter(item => item.value > 0);
+
+    return {
+      valueStatusData,
+      totalWithValue: dealsWithValue.length
+    };
   }, [newDeals]);
 
   const [selectedBrokerForSourceChart, setSelectedBrokerForSourceChart] = useState<string | null>(null);
