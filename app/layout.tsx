@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ScrollToTopButton } from "@/components/scroll-to-top-button";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -24,6 +25,7 @@ export default function RootLayout({
       <body className={montserrat.variable}>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           {children}
+          <ScrollToTopButton />
         </ThemeProvider>
       </body>
     </html>

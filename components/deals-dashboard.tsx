@@ -1,8 +1,9 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 
-import { useState, useMemo, useCallback, useEffect } from "react"
+import { useState, useMemo, useCallback, useEffect, useRef } from "react"
+import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -26,12 +27,15 @@ import {
   Home,
   Maximize,
   Minimize,
-  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+  Info,
 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { CalendarIcon } from "lucide-react"
+import { Calendar as CalendarComponent } from "@/components/ui/calendar"
+import { CalendarIcon, ChevronUp, ChevronDown } from "lucide-react"
 import { format } from "date-fns"
 import { WeeklyAnalysis } from "@/components/weekly-analysis"
 import { ChartComment } from "@/components/chart-comment"
@@ -39,9 +43,28 @@ import { useFullscreen } from "@/hooks/use-fullscreen"
 import { LoadingAnimation } from "@/components/loading-animation"
 import * as XLSX from "xlsx"
 import Image from "next/image"
-import Link from "next/link"
 
+// Original color palette - note that #A0E82A is too similar to Jo's #a2e329
 const CHART_COLORS = ["#751FAE", "#EF3C99", "#3CBDE5", "#FF701F", "#FFA31F", "#A0E82A"];
+
+// Fixed colors for specific brokers
+const BROKER_FIXED_COLORS: Record<string, string> = {
+  "Miao (Amy)": "#3cbde5",
+  "QianShuo(Jo)": "#a2e329"
+};
+
+// Create a filtered color palette excluding colors that are fixed or too similar to fixed colors
+// Remove #3CBDE5 (Amy's color) and #A0E82A (too similar to Jo's #a2e329)
+const AVAILABLE_COLORS = ["#751FAE", "#EF3C99", "#FF701F", "#FFA31F", "#4B5563", "#EC4899"];
+
+// Global function to get broker color with fixed colors for specific brokers
+const getBrokerColor = (brokerName: string, index: number): string => {
+  if (BROKER_FIXED_COLORS[brokerName]) {
+    return BROKER_FIXED_COLORS[brokerName];
+  }
+  // Use available colors that don't conflict with fixed colors
+  return AVAILABLE_COLORS[index % AVAILABLE_COLORS.length];
+};
 
 interface Deal {
   deal_id: string; deal_name: string; broker_name: string; deal_value: number; created_time?: string | null; "Enquiry Leads": string | null; Opportunity: string | null; "1. Application": string | null; "2. Assessment": string | null; "3. Approval": string | null; "4. Loan Document": string | null; "5. Settlement Queue": string | null; "6. Settled": string | null; "2025 Settlement": string | null; "2024 Settlement": string | null; "Lost date": string | null; "lost reason": string | null; "which process (if lost)": string | null; status: string; "process days": number | null; latest_date: string | null; "new_lead?": string | null; "From Rednote?": string; "From LifeX?": string;
@@ -365,7 +388,7 @@ function InteractiveTreemap({ deals, width = 800, height = 500 }: { deals: Deal[
   );
 }
 
-function PieChart({ data = [], size = 200, legendTextColor = "text-deep-purple-text", onLegendClick, selectedLabel }: { data?: Array<{ label: string; value: number; color: string }>; size?: number; legendTextColor?: string; onLegendClick?: (label: string) => void; selectedLabel?: string | null }) {
+function PieChart({ data = [], size = 200, legendTextColor = "text-deep-purple-text", onLegendClick, selectedLabel }: { data?: Array<{ label: string; value: number; color: string; conversionRate?: string; settleRate?: string; convertedCount?: number; settledCount?: number }>; size?: number; legendTextColor?: string; onLegendClick?: (label: string) => void; selectedLabel?: string | null }) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
   if (total === 0) return <div className="flex items-center justify-center" style={{ width: size, height: size }}><span className="text-deep-purple-text/70">No data</span></div>;
   let cumulativePercentage = 0;
@@ -396,7 +419,14 @@ function PieChart({ data = [], size = 200, legendTextColor = "text-deep-purple-t
         {data.map((item, index) => (
           <div key={index} onClick={() => onLegendClick && onLegendClick(item.label)} className={`flex items-center gap-2 text-sm cursor-pointer p-1 rounded-md transition-colors duration-150 ${selectedLabel === item.label ? 'bg-white/20' : 'bg-transparent hover:bg-white/10'}`}>
             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-            <span className={legendTextColor}>{item.label}: {item.value} ({((item.value / total) * 100).toFixed(1)}%)</span>
+            <div className="flex flex-col">
+              <span className={legendTextColor}>{item.label}: {item.value} ({((item.value / total) * 100).toFixed(1)}%)</span>
+              {item.conversionRate && item.settleRate && (
+                <span className={`text-xs ${legendTextColor} opacity-70`}>
+                  Conv: {item.conversionRate}% ({item.convertedCount} deals) | Settle: {item.settleRate}% ({item.settledCount} deals)
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -546,7 +576,7 @@ function DoubleRingPieChart({ outerData = [], innerData = [], size = 300 }: { ou
       </svg>
       <div className="grid grid-cols-2 gap-6 text-sm">
         <div>
-          <h4 className="font-semibold mb-2 text-deep-purple-text">Outer Ring - Total Deals</h4>
+          <h4 className="font-semibold mb-2 text-deep-purple-text">Outer Ring - Filtered Period</h4>
           {outerData.length > 0 ? outerData.map((item, index) => (
             <div key={index} className="flex items-center gap-2 mb-1">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
@@ -568,17 +598,196 @@ function DoubleRingPieChart({ outerData = [], innerData = [], size = 300 }: { ou
   );
 }
 
+function BrokerPerformanceTable({ brokers }: { brokers: Array<{ 
+  name: string; 
+  total: number; 
+  settled: number; 
+  value: number; 
+  converted: number;
+  conversionRate: string;
+  settledRate: string; 
+  sourceBreakdown?: Array<{
+    source: string;
+    total: number;
+    converted: number;
+    conversionRate: string;
+    settled: number;
+    settledRate: string;
+    value: number;
+  }> 
+}> }) {
+  const [showSourceBreakdown, setShowSourceBreakdown] = useState(false);
+
+  const formatCurrency = (value: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
+
+  return (
+    <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-violet">Broker Performance</CardTitle>
+            <CardDescription className="text-violet/80">
+              Performance metrics for each broker. Total brokers: {brokers.length}, 
+              Total deals: {brokers.reduce((sum, broker) => sum + broker.total, 0)}
+            </CardDescription>
+          </div>
+          <Button
+            variant={showSourceBreakdown ? "outline" : "default"}
+            size="sm"
+            onClick={() => setShowSourceBreakdown(!showSourceBreakdown)}
+            className="ml-4"
+          >
+            {showSourceBreakdown ? "Source Breakdown" : "Total"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Broker</TableHead>
+              <TableHead>Total Deals</TableHead>
+              <TableHead>Converted Deals</TableHead>
+              <TableHead>Conversion Rate</TableHead>
+              <TableHead>Settled Deals</TableHead>
+              <TableHead>Settled Rate</TableHead>
+              <TableHead>Total Value Settled</TableHead>
+              <TableHead>In Progress</TableHead>
+              <TableHead>Lost Deals</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {brokers.map((broker) => (
+              <React.Fragment key={broker.name}>
+                <TableRow className="font-medium">
+                  <TableCell className="font-bold text-deep-purple-text">{broker.name}</TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">{broker.total}</TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">{broker.converted}</TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">{broker.conversionRate}%</TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">{broker.settled}</TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">{broker.settledRate}%</TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">{formatCurrency(broker.value)}</TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">
+                    {broker.inProgress}
+                    {broker.inProgressConverted > 0 && (
+                      <span className="ml-1">({broker.inProgressConverted})</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-bold text-deep-purple-text">{broker.lost}</TableCell>
+                </TableRow>
+                {showSourceBreakdown && broker.sourceBreakdown && broker.sourceBreakdown.map((source) => (
+                  <TableRow key={`${broker.name}-${source.source}`} className="bg-gray-50/50">
+                    <TableCell className="pl-8 text-sm text-deep-purple-text/80">{source.source}</TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">{source.total}</TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">{source.converted}</TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">{source.conversionRate}%</TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">{source.settled}</TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">{source.settledRate}%</TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">{formatCurrency(source.value)}</TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">
+                      {source.inProgress}
+                      {source.inProgressConverted > 0 && (
+                        <span className="ml-1">({source.inProgressConverted})</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-deep-purple-text/80">{source.lost}</TableCell>
+                  </TableRow>
+                ))}
+              </React.Fragment>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SankeyDiagram({ deals, startDate, endDate }: { deals: Deal[]; startDate: string; endDate: string }) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [showLostDeals, setShowLostDeals] = useState(false);
-  const [sortField, setSortField] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [sortColumns, setSortColumns] = useState<Array<{ field: string; direction: "asc" | "desc" }>>([]);
   const [selectedLostReason, setSelectedLostReason] = useState<string | null>(null);
+  const lostDealsScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (showLostDeals) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showLostDeals]);
+
+  // Handle ESC key to close Lost Deals modal
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && showLostDeals) {
+        setShowLostDeals(false);
+        setSelectedLostReason(null);
+        setSortColumns([]);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showLostDeals]);
 
   const formatCurrency = (value: number) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
-  const handleSort = (field: string) => { if (sortField === field) setSortDirection(sortDirection === "asc" ? "desc" : "asc"); else { setSortField(field); setSortDirection("asc") } };
-  const getSortIcon = (field: string) => { if (sortField !== field) return <ArrowUpDown className="h-3 w-3" />; return sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> };
+  const handleSort = (field: string, ctrlKey: boolean = false) => {
+    setSortColumns(prevSortColumns => {
+      const existingIndex = prevSortColumns.findIndex(col => col.field === field);
+      
+      if (!ctrlKey) {
+        // Single column sorting (default behavior)
+        if (existingIndex >= 0) {
+          const existingCol = prevSortColumns[existingIndex];
+          if (existingCol.direction === "asc") {
+            return [{ field, direction: "desc" }];
+          } else {
+            return []; // Remove sorting
+          }
+        } else {
+          return [{ field, direction: "asc" }];
+        }
+      } else {
+        // Multi-column sorting (Ctrl+click)
+        if (existingIndex >= 0) {
+          const existingCol = prevSortColumns[existingIndex];
+          if (existingCol.direction === "asc") {
+            // Change to desc
+            const newColumns = [...prevSortColumns];
+            newColumns[existingIndex] = { field, direction: "desc" };
+            return newColumns;
+          } else {
+            // Remove this column from sorting
+            return prevSortColumns.filter((_, index) => index !== existingIndex);
+          }
+        } else {
+          // Add new sort column
+          return [...prevSortColumns, { field, direction: "asc" }];
+        }
+      }
+    });
+  };
+  
+  const getSortIcon = (field: string) => {
+    const sortColumn = sortColumns.find(col => col.field === field);
+    if (!sortColumn) return <ArrowUpDown className="h-3 w-3" />;
+    const sortIndex = sortColumns.findIndex(col => col.field === field);
+    const sortNumber = sortColumns.length > 1 ? <span className="text-[10px] ml-1">{sortIndex + 1}</span> : null;
+    return (
+      <span className="inline-flex items-center">
+        {sortColumn.direction === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+        {sortNumber}
+      </span>
+    );
+  };
 
   const sankeyData = useMemo(() => {
     const stages = ["Enquiry Leads", "Opportunity", "1. Application", "2. Assessment", "3. Approval", "4. Loan Document", "5. Settlement Queue", "6. Settled"];
@@ -786,8 +995,6 @@ function SankeyDiagram({ deals, startDate, endDate }: { deals: Deal[]; startDate
     return (
       <div className="w-full overflow-x-auto relative h-[55vh]">
         <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet" className="border rounded-lg bg-white/70">
-          <defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e0e0e0" strokeWidth="1" /></pattern></defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
           {Array.from(linksBySource.entries()).flatMap(([source, targets]) => {
             const sourcePos = nodePositions.get(source); 
             if (!sourcePos) return [];
@@ -848,14 +1055,20 @@ function SankeyDiagram({ deals, startDate, endDate }: { deals: Deal[]; startDate
             <rect x="0" y="0" width="200" height="65" fill="white" stroke="#ddd" rx="5" opacity="0.9" />
             <text x="10" y="20" className="text-sm font-semibold fill-deep-purple-text">Legend</text>
             <rect x="10" y="30" width="15" height="8" fill="#751FAE" /><text x="30" y="38" className="text-xs fill-deep-purple-text">Normal Flow</text>
-            <rect x="10" y="45" width="15" height="8" fill="#9CA3AF" /><text x="30" y="53" className="text-xs fill-deep-purple-text">Lost Flow (hover for reasons, click for details)</text>
+            <rect x="10" y="45" width="15" height="8" fill="#9CA3AF" /><text x="30" y="53" className="text-xs fill-deep-purple-text">Lost Flow (click for details)</text>
           </g>
         </svg>
         {showLostDeals && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg shadow-xl w-[95vw] h-[90vh] mx-4 overflow-hidden resize text-deep-purple-text" style={{ minWidth: "800px", minHeight: "600px" }}>
-              <div className="flex items-center justify-between p-6 border-b"><h2 className="text-xl font-semibold">Lost Deals Details</h2><button onClick={() => { setShowLostDeals(false); setSelectedLostReason(null); }} className="text-gray-400 hover:text-gray-600 text-2xl">×</button></div>
-              <div className="p-6 overflow-y-auto h-[calc(90vh-120px)]">
+              <div className="flex items-center justify-between p-6 border-b">
+                <div>
+                  <h2 className="text-xl font-semibold">Lost Deals Details</h2>
+                  <p className="text-sm text-gray-500 mt-1">Hold Ctrl/Cmd and click headers to sort by multiple columns</p>
+                </div>
+                <button onClick={() => { setShowLostDeals(false); setSelectedLostReason(null); setSortColumns([]); }} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
+              </div>
+              <div ref={lostDealsScrollRef} className="p-6 overflow-y-auto h-[calc(90vh-120px)]">
                 <div className="grid gap-6 lg:grid-cols-4">
                   <div className="lg:col-span-1">
                     <Card>
@@ -870,7 +1083,13 @@ function SankeyDiagram({ deals, startDate, endDate }: { deals: Deal[]; startDate
                               data={lostReasonsData} 
                               size={250} 
                               legendTextColor="text-white" 
-                              onLegendClick={(label) => setSelectedLostReason(label || null)} 
+                              onLegendClick={(label) => {
+                                setSelectedLostReason(label || null);
+                                // Scroll to top of the modal content
+                                if (lostDealsScrollRef.current) {
+                                  lostDealsScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                                }
+                              }} 
                               selectedLabel={selectedLostReason} 
                             />
                           </div>
@@ -887,29 +1106,39 @@ function SankeyDiagram({ deals, startDate, endDate }: { deals: Deal[]; startDate
                     <div className="mb-4 text-sm text-deep-purple-text/80">Total Lost Deals: {deals.filter((d) => d.status === "Lost").length}</div>
                     <div className="rounded-md border overflow-x-auto">
                       <Table><TableHeader><TableRow>
-                        <TableHead className="min-w-[150px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={() => handleSort("deal_name")}>Deal Name{getSortIcon("deal_name")}</Button></TableHead>
-                        <TableHead className="min-w-[120px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={() => handleSort("broker_name")}>Broker{getSortIcon("broker_name")}</Button></TableHead>
-                        <TableHead className="min-w-[100px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={() => handleSort("deal_value")}>Value{getSortIcon("deal_value")}</Button></TableHead>
-                        <TableHead className="min-w-[150px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={() => handleSort("lost_reason")}>Lost Reason{getSortIcon("lost_reason")}</Button></TableHead>
-                        <TableHead className="min-w-[120px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={() => handleSort("lost_process")}>Lost Process{getSortIcon("lost_process")}</Button></TableHead>
-                        <TableHead className="min-w-[100px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={() => handleSort("lost_date")}>Lost Date{getSortIcon("lost_date")}</Button></TableHead>
-                        <TableHead className="min-w-[100px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={() => handleSort("process_days")}>Process Days{getSortIcon("process_days")}</Button></TableHead>
+                        <TableHead className="min-w-[150px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={(e) => handleSort("deal_name", e.ctrlKey || e.metaKey)}>Deal Name{getSortIcon("deal_name")}</Button></TableHead>
+                        <TableHead className="min-w-[120px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={(e) => handleSort("broker_name", e.ctrlKey || e.metaKey)}>Broker{getSortIcon("broker_name")}</Button></TableHead>
+                        <TableHead className="min-w-[100px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={(e) => handleSort("deal_value", e.ctrlKey || e.metaKey)}>Value{getSortIcon("deal_value")}</Button></TableHead>
+                        <TableHead className="min-w-[150px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={(e) => handleSort("lost_reason", e.ctrlKey || e.metaKey)}>Lost Reason{getSortIcon("lost_reason")}</Button></TableHead>
+                        <TableHead className="min-w-[120px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={(e) => handleSort("lost_process", e.ctrlKey || e.metaKey)}>Lost Process{getSortIcon("lost_process")}</Button></TableHead>
+                        <TableHead className="min-w-[100px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={(e) => handleSort("lost_date", e.ctrlKey || e.metaKey)}>Lost Date{getSortIcon("lost_date")}</Button></TableHead>
+                        <TableHead className="min-w-[100px]"><Button variant="ghost" className="h-auto p-0 font-semibold text-xs" onClick={(e) => handleSort("process_days", e.ctrlKey || e.metaKey)}>Process Days{getSortIcon("process_days")}</Button></TableHead>
                       </TableRow></TableHeader>
                         <TableBody>
                           {deals.filter((d) => d.status === "Lost" && (!selectedLostReason || d["lost reason"] === selectedLostReason)).sort((a, b) => {
-                            if (!sortField) return 0; let aValue: any, bValue: any;
-                            switch (sortField) {
-                              case "deal_name": aValue = a.deal_name || ""; bValue = b.deal_name || ""; break;
-                              case "broker_name": aValue = a.broker_name || ""; bValue = b.broker_name || ""; break;
-                              case "deal_value": aValue = a.deal_value || 0; bValue = b.deal_value || 0; break;
-                              case "lost_reason": aValue = a["lost reason"] || ""; bValue = b["lost reason"] || ""; break;
-                              case "lost_process": aValue = a["which process (if lost)"] || ""; bValue = b["which process (if lost)"] || ""; break;
-                              case "lost_date": aValue = a["Lost date"] ? new Date(a["Lost date"]).getTime() : 0; bValue = b["Lost date"] ? new Date(b["Lost date"]).getTime() : 0; break;
-                              case "process_days": aValue = a["process days"] || 0; bValue = b["process days"] || 0; break;
-                              default: return 0;
+                            for (const sortColumn of sortColumns) {
+                              let aValue: any, bValue: any;
+                              switch (sortColumn.field) {
+                                case "deal_name": aValue = a.deal_name || ""; bValue = b.deal_name || ""; break;
+                                case "broker_name": aValue = a.broker_name || ""; bValue = b.broker_name || ""; break;
+                                case "deal_value": aValue = a.deal_value || 0; bValue = b.deal_value || 0; break;
+                                case "lost_reason": aValue = a["lost reason"] || ""; bValue = b["lost reason"] || ""; break;
+                                case "lost_process": aValue = a["which process (if lost)"] || ""; bValue = b["which process (if lost)"] || ""; break;
+                                case "lost_date": aValue = a["Lost date"] ? new Date(a["Lost date"]).getTime() : 0; bValue = b["Lost date"] ? new Date(b["Lost date"]).getTime() : 0; break;
+                                case "process_days": aValue = a["process days"] || 0; bValue = b["process days"] || 0; break;
+                                default: continue;
+                              }
+                              let comparison: number;
+                              if (typeof aValue === "number" && typeof bValue === "number") {
+                                comparison = aValue - bValue;
+                              } else {
+                                comparison = String(aValue).localeCompare(String(bValue));
+                              }
+                              if (comparison !== 0) {
+                                return sortColumn.direction === "asc" ? comparison : -comparison;
+                              }
                             }
-                            if (typeof aValue === "number" && typeof bValue === "number") return sortDirection === "asc" ? aValue - bValue : bValue - aValue;
-                            const comparison = String(aValue).localeCompare(String(bValue)); return sortDirection === "asc" ? comparison : -comparison;
+                            return 0;
                           }).map((deal) => (
                             <TableRow key={deal.deal_id}><TableCell className="font-medium text-sm text-deep-purple-text">{deal.deal_name}</TableCell>
                               <TableCell className="text-sm text-deep-purple-text/90">{deal.broker_name}</TableCell>
@@ -947,21 +1176,94 @@ export function DealsDashboard() {
   const [sourceFilter, setSourceFilter] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [sortField, setSortField] = useState<SortField | null>("status");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  // Helper functions for week navigation
+  const getWeekStart = (date: Date): string => {
+    const day = date.getDay();
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+    const monday = new Date(date.setDate(diff));
+    return monday.toISOString().split('T')[0];
+  };
+
+  const getWeekEnd = (date: Date): string => {
+    const day = date.getDay();
+    const diff = date.getDate() - day + (day === 0 ? 0 : 7); // Adjust when day is Sunday
+    const sunday = new Date(date.setDate(diff));
+    return sunday.toISOString().split('T')[0];
+  };
+
+  const getCurrentWeekRange = (): { start: string; end: string } => {
+    const now = new Date();
+    return {
+      start: getWeekStart(new Date(now)),
+      end: getWeekEnd(new Date(now))
+    };
+  };
+
+  const navigateWeek = (direction: 'prev' | 'next') => {
+    if (!startDate || !endDate) {
+      // If no current range, set to current week
+      const currentWeek = getCurrentWeekRange();
+      setStartDate(currentWeek.start);
+      setEndDate(currentWeek.end);
+      return;
+    }
+
+    const currentStart = new Date(startDate);
+    const offset = direction === 'prev' ? -7 : 7;
+    
+    const newStart = new Date(currentStart);
+    newStart.setDate(currentStart.getDate() + offset);
+    
+    const newEnd = new Date(newStart);
+    newEnd.setDate(newStart.getDate() + 6);
+
+    setStartDate(newStart.toISOString().split('T')[0]);
+    setEndDate(newEnd.toISOString().split('T')[0]);
+  };
+  const [sortColumns, setSortColumns] = useState<Array<{ field: SortField; direction: SortDirection }>>([
+    { field: "broker_name", direction: "asc" },
+    { field: "status", direction: "asc" },
+    { field: "deal_value", direction: "desc" }
+  ]);
   const [newDealsSortField, setNewDealsSortField] = useState<SortField | null>("status");
   const [newDealsSortDirection, setNewDealsSortDirection] = useState<SortDirection>("asc");
   
   const { isFullscreen, isSupported, toggleFullscreen } = useFullscreen();
 
-  // Initial loading animation
+  // Load data from sessionStorage on component mount
   useEffect(() => {
+    const loadStoredData = () => {
+      try {
+        const storedDeals = sessionStorage.getItem('dashboard-deals-data');
+        if (storedDeals) {
+          const parsedDeals = JSON.parse(storedDeals);
+          setDeals(parsedDeals);
+        }
+      } catch (error) {
+        console.error('Failed to load stored deals:', error);
+      }
+    };
+
+    loadStoredData();
+    
     const timer = setTimeout(() => {
       setIsLoading(false);
     }, 2000); // Show loading animation for 2 seconds on initial load
     
     return () => clearTimeout(timer);
   }, []);
+
+  // Save data to sessionStorage whenever deals change
+  useEffect(() => {
+    if (deals.length > 0) {
+      try {
+        sessionStorage.setItem('dashboard-deals-data', JSON.stringify(deals));
+      } catch (error) {
+        console.error('Failed to save deals to sessionStorage:', error);
+      }
+    }
+  }, [deals]);
 
   const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return; setIsLoading(true); setError(null);
@@ -987,14 +1289,50 @@ export function DealsDashboard() {
         }).filter((deal) => deal.deal_name && deal.deal_name.trim() !== "");
         setDeals(dealsArray); setError(null);
       } else throw new Error("Unsupported file format. Please upload a JSON or Excel (.xlsx/.xls) file.");
-    } catch (err) { setError(err instanceof Error ? err.message : "Failed to parse file"); setDeals([]) }
+    } catch (err) { 
+      setError(err instanceof Error ? err.message : "Failed to parse file"); 
+      setDeals([]);
+      sessionStorage.removeItem('dashboard-deals-data');
+    }
     finally { setIsLoading(false) }
   }, []);
 
-  const handleSort = useCallback((field: SortField) => {
-    if (sortField === field) { if (sortDirection === "asc") setSortDirection("desc"); else if (sortDirection === "desc") { setSortDirection(null); setSortField(null) } else setSortDirection("asc") }
-    else { setSortField(field); setSortDirection("asc") }
-  }, [sortField, sortDirection]);
+  const handleSort = useCallback((field: SortField, ctrlKey: boolean = false) => {
+    setSortColumns(prevSortColumns => {
+      const existingIndex = prevSortColumns.findIndex(col => col.field === field);
+      
+      if (!ctrlKey) {
+        // Single column sorting (default behavior)
+        if (existingIndex >= 0) {
+          const existingCol = prevSortColumns[existingIndex];
+          if (existingCol.direction === "asc") {
+            return [{ field, direction: "desc" }];
+          } else {
+            return []; // Remove sorting
+          }
+        } else {
+          return [{ field, direction: "asc" }];
+        }
+      } else {
+        // Multi-column sorting (Ctrl+click)
+        if (existingIndex >= 0) {
+          const existingCol = prevSortColumns[existingIndex];
+          if (existingCol.direction === "asc") {
+            // Change to desc
+            const newSortColumns = [...prevSortColumns];
+            newSortColumns[existingIndex] = { field, direction: "desc" };
+            return newSortColumns;
+          } else {
+            // Remove this column from sorting
+            return prevSortColumns.filter((_, index) => index !== existingIndex);
+          }
+        } else {
+          // Add new column to sorting
+          return [...prevSortColumns, { field, direction: "asc" }];
+        }
+      }
+    });
+  }, []);
 
   const handleNewDealsSort = useCallback((field: SortField) => {
     if (newDealsSortField === field) { 
@@ -1011,8 +1349,15 @@ export function DealsDashboard() {
   }, [newDealsSortField, newDealsSortDirection]);
 
   const getSortIcon = useCallback((field: SortField) => {
-    if (sortField !== field) return <ArrowUpDown className="h-4 w-4" />; if (sortDirection === "asc") return <ArrowUp className="h-4 w-4" />; if (sortDirection === "desc") return <ArrowDown className="h-4 w-4" />; return <ArrowUpDown className="h-4 w-4" />
-  }, [sortField, sortDirection]);
+    const sortCol = sortColumns.find(col => col.field === field);
+    if (!sortCol) return <ArrowUpDown className="h-4 w-4" />;
+    return sortCol.direction === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
+  }, [sortColumns]);
+  
+  const getSortOrder = useCallback((field: SortField) => {
+    const index = sortColumns.findIndex(col => col.field === field);
+    return index >= 0 ? index + 1 : null;
+  }, [sortColumns]);
 
   const getStatusBadgeClass = (status: string) => {
     const statusClass = status.toLowerCase().replace(/\s+/g, '-').replace(/\./g, '-');
@@ -1035,6 +1380,49 @@ export function DealsDashboard() {
       return latestStage || deal.status || "Unknown";
   };
 
+  // Filtered deals for KPI cards (without source filter)
+  const filteredDealsForKPI = useMemo(() => {
+    return deals.filter((deal) => {
+      const matchesSearch = 
+        String(deal.deal_name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+        String(deal.broker_name || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === "all" || deal.status === statusFilter;
+      const matchesBroker = brokerFilter === "all" || deal.broker_name === brokerFilter;
+      // NOTE: No source filter applied here for KPI cards
+      
+      const dateToCheck = deal.latest_date || deal["6. Settled"] || deal.created_time;
+      let matchesDateRange = true;
+      if (startDate || endDate) {
+        if (!dateToCheck) {
+            matchesDateRange = false;
+        } else {
+            const dealDateRaw = new Date(dateToCheck);
+            if (isNaN(dealDateRaw.getTime())) {
+                matchesDateRange = false;
+            } else {
+                const year = String(dealDateRaw.getFullYear());
+                const month = String(dealDateRaw.getMonth() + 1).padStart(2, '0');
+                const day = String(dealDateRaw.getDate()).padStart(2, '0');
+                const dealDateStr = `${year}-${month}-${day}`; // 获取 YYYY-MM-DD 格式
+
+                if (startDate) {
+                    if (dealDateStr < startDate) {
+                        matchesDateRange = false;
+                    }
+                }
+                if (endDate && matchesDateRange) {
+                    if (dealDateStr > endDate) {
+                        matchesDateRange = false;
+                    }
+                }
+            }
+        }
+      }
+
+      return matchesSearch && matchesStatus && matchesBroker && matchesDateRange;
+    });
+  }, [deals, searchTerm, statusFilter, brokerFilter, startDate, endDate]);
+
   const filteredDeals = useMemo(() => {
     const filtered = deals.filter((deal) => {
       const matchesSearch = 
@@ -1042,7 +1430,7 @@ export function DealsDashboard() {
         String(deal.broker_name || '').toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === "all" || deal.status === statusFilter;
       const matchesBroker = brokerFilter === "all" || deal.broker_name === brokerFilter;
-      const matchesSource = sourceFilter === "all" || (sourceFilter === "rednote" && deal["From Rednote?"] === "Yes") || (sourceFilter === "lifex" && deal["From LifeX?"] === "Yes") || (sourceFilter === "other" && deal["From Rednote?"] === "No" && deal["From LifeX?"] === "No");
+      const matchesSource = sourceFilter === "all" || (sourceFilter === "rednote" && deal["From Rednote?"] === "Yes") || (sourceFilter === "lifex" && deal["From LifeX?"] === "Yes") || (sourceFilter === "referral" && deal["From Rednote?"] === "No" && deal["From LifeX?"] === "No");
       
       const dateToCheck = deal.latest_date || deal["6. Settled"] || deal.created_time;
       let matchesDateRange = true;
@@ -1077,63 +1465,183 @@ export function DealsDashboard() {
       return matchesSearch && matchesStatus && matchesBroker && matchesSource && matchesDateRange;
     });
 
-    if (sortField && sortDirection) {
+    if (sortColumns.length > 0) {
       filtered.sort((a, b) => {
-        let aValue: any, bValue: any;
-        switch (sortField) {
-          case "deal_name": aValue = a.deal_name || ""; bValue = b.deal_name || ""; break;
-          case "broker_name": aValue = a.broker_name || ""; bValue = b.broker_name || ""; break;
-          case "deal_value": aValue = a.deal_value || 0; bValue = b.deal_value || 0; break;
-          case "status": 
-            // Use predefined status order for sorting
-            const statusOrder = [
-              "Enquiry Leads",
-              "Opportunity", 
-              "1. Application",
-              "2. Assessment",
-              "3. Approval",
-              "4. Loan Document",
-              "5. Settlement Queue",
-              "6. Settled",
-              "Lost"
-            ];
-            const aStatus = getDealDisplayStatus(a);
-            const bStatus = getDealDisplayStatus(b);
-            aValue = statusOrder.indexOf(aStatus);
-            bValue = statusOrder.indexOf(bStatus);
-            // If status not found in order, put it at the end
-            if (aValue === -1) aValue = 999;
-            if (bValue === -1) bValue = 999;
-            break;
-          case "source": aValue = a["From Rednote?"] === "Yes" ? "RedNote" : a["From LifeX?"] === "Yes" ? "LifeX" : "Other"; bValue = b["From Rednote?"] === "Yes" ? "RedNote" : b["From LifeX?"] === "Yes" ? "LifeX" : "Other"; break;
-          case "process_days": aValue = a["process days"] || 0; bValue = b["process days"] || 0; break;
-          case "latest_date": aValue = a.latest_date ? new Date(a.latest_date).getTime() : 0; bValue = b.latest_date ? new Date(b.latest_date).getTime() : 0; break;
-          case "lost_reason": aValue = a["lost reason"] || ""; bValue = b["lost reason"] || ""; break;
-          case "lost_process": aValue = a["which process (if lost)"] || ""; bValue = b["which process (if lost)"] || ""; break;
-          default: return 0;
+        for (const sortCol of sortColumns) {
+          let aValue: any, bValue: any;
+          const { field, direction } = sortCol;
+          
+          switch (field) {
+            case "deal_name": aValue = a.deal_name || ""; bValue = b.deal_name || ""; break;
+            case "broker_name": aValue = a.broker_name || ""; bValue = b.broker_name || ""; break;
+            case "deal_value": aValue = a.deal_value || 0; bValue = b.deal_value || 0; break;
+            case "status": 
+              // Use predefined status order for sorting
+              const statusOrder = [
+                "Enquiry Leads",
+                "Opportunity", 
+                "1. Application",
+                "2. Assessment",
+                "3. Approval",
+                "4. Loan Document",
+                "5. Settlement Queue",
+                "6. Settled",
+                "Lost"
+              ];
+              const aStatus = getDealDisplayStatus(a);
+              const bStatus = getDealDisplayStatus(b);
+              aValue = statusOrder.indexOf(aStatus);
+              bValue = statusOrder.indexOf(bStatus);
+              // If status not found in order, put it at the end
+              if (aValue === -1) aValue = 999;
+              if (bValue === -1) bValue = 999;
+              break;
+            case "source": aValue = a["From Rednote?"] === "Yes" ? "RedNote" : a["From LifeX?"] === "Yes" ? "LifeX" : "Referral"; bValue = b["From Rednote?"] === "Yes" ? "RedNote" : b["From LifeX?"] === "Yes" ? "LifeX" : "Referral"; break;
+            case "process_days": aValue = a["process days"] || 0; bValue = b["process days"] || 0; break;
+            case "latest_date": aValue = a.latest_date ? new Date(a.latest_date).getTime() : 0; bValue = b.latest_date ? new Date(b.latest_date).getTime() : 0; break;
+            case "lost_reason": aValue = a["lost reason"] || ""; bValue = b["lost reason"] || ""; break;
+            case "lost_process": aValue = a["which process (if lost)"] || ""; bValue = b["which process (if lost)"] || ""; break;
+            default: continue;
+          }
+          
+          let comparison = 0;
+          if (typeof aValue === "number" && typeof bValue === "number") {
+            comparison = direction === "asc" ? aValue - bValue : bValue - aValue;
+          } else {
+            comparison = String(aValue).localeCompare(String(bValue));
+            comparison = direction === "asc" ? comparison : -comparison;
+          }
+          
+          if (comparison !== 0) {
+            return comparison;
+          }
         }
-        if (typeof aValue === "number" && typeof bValue === "number") return sortDirection === "asc" ? aValue - bValue : bValue - aValue;
-        const comparison = String(aValue).localeCompare(String(bValue)); return sortDirection === "asc" ? comparison : -comparison;
+        return 0;
       });
     }
     return filtered;
-  }, [deals, searchTerm, statusFilter, brokerFilter, sourceFilter, startDate, endDate, sortField, sortDirection, getDealDisplayStatus]);
+  }, [deals, searchTerm, statusFilter, brokerFilter, sourceFilter, startDate, endDate, sortColumns, getDealDisplayStatus]);
 
   const stats = useMemo(() => {
-    const totalDeals = filteredDeals.length;
-    const settledCount = filteredDeals.filter((d) => d["6. Settled"] && d["6. Settled"].trim() !== "").length;
+    const totalDeals = filteredDealsForKPI.length;
+    const settledCount = filteredDealsForKPI.filter((d) => d["6. Settled"] && d["6. Settled"].trim() !== "").length;
     const settledRate = totalDeals > 0 ? ((settledCount / totalDeals) * 100).toFixed(1) : "0";
-    const convertedCount = filteredDeals.filter((d) => (d["1. Application"] && d["1. Application"].trim() !== "") || (d["2. Assessment"] && d["2. Assessment"].trim() !== "") || (d["3. Approval"] && d["3. Approval"].trim() !== "") || (d["4. Loan Document"] && d["4. Loan Document"].trim() !== "") || (d["5. Settlement Queue"] && d["5. Settlement Queue"].trim() !== "") || (d["6. Settled"] && d["6. Settled"].trim() !== "") || (d["2025 Settlement"] && d["2025 Settlement"].trim() !== "") || (d["2024 Settlement"] && d["2024 Settlement"].trim() !== "")).length;
+    const convertedCount = filteredDealsForKPI.filter((d) => (d["1. Application"] && d["1. Application"].trim() !== "") || (d["2. Assessment"] && d["2. Assessment"].trim() !== "") || (d["3. Approval"] && d["3. Approval"].trim() !== "") || (d["4. Loan Document"] && d["4. Loan Document"].trim() !== "") || (d["5. Settlement Queue"] && d["5. Settlement Queue"].trim() !== "") || (d["6. Settled"] && d["6. Settled"].trim() !== "") || (d["2025 Settlement"] && d["2025 Settlement"].trim() !== "") || (d["2024 Settlement"] && d["2024 Settlement"].trim() !== "")).length;
     const conversionRate = totalDeals > 0 ? ((convertedCount / totalDeals) * 100).toFixed(1) : "0";
-    const lostDeals = filteredDeals.filter((d) => d.status === "Lost").length;
-    const totalValue = filteredDeals.reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
-    const settledValue = filteredDeals.filter((d) => d["6. Settled"] && d["6. Settled"].trim() !== "").reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
+    const lostDeals = filteredDealsForKPI.filter((d) => d.status === "Lost").length;
+    const totalValue = filteredDealsForKPI.reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
+    const settledValue = filteredDealsForKPI.filter((d) => d["6. Settled"] && d["6. Settled"].trim() !== "").reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
     return { totalDeals, settledCount, settledRate, convertedCount, conversionRate, lostDeals, totalValue, settledValue };
-  }, [filteredDeals]);
+  }, [filteredDealsForKPI]);
 
   const brokers = useMemo(() => {
-    const brokerStats = filteredDeals.reduce((acc, deal) => { if (!acc[deal.broker_name]) acc[deal.broker_name] = { total: 0, settled: 0, value: 0 }; acc[deal.broker_name].total++; if (deal["6. Settled"] && deal["6. Settled"].trim() !== "") { acc[deal.broker_name].settled++; acc[deal.broker_name].value += deal.deal_value || 0 } return acc }, {} as Record<string, { total: number; settled: number; value: number }>);
-    return Object.entries(brokerStats).map(([name, stats]) => ({ name, ...stats, settledRate: stats.total > 0 ? ((stats.settled / stats.total) * 100).toFixed(1) : "0" })).sort((a, b) => b.value - a.value);
+    const brokerStats = filteredDeals.reduce((acc, deal) => {
+      if (!acc[deal.broker_name]) acc[deal.broker_name] = { total: 0, settled: 0, value: 0, converted: 0, lost: 0, inProgress: 0, inProgressConverted: 0 };
+      acc[deal.broker_name].total++;
+
+      // Check if deal is converted (has entered any processing stage)
+      const isConverted = (deal["1. Application"] && deal["1. Application"].trim() !== "") ||
+        (deal["2. Assessment"] && deal["2. Assessment"].trim() !== "") ||
+        (deal["3. Approval"] && deal["3. Approval"].trim() !== "") ||
+        (deal["4. Loan Document"] && deal["4. Loan Document"].trim() !== "") ||
+        (deal["5. Settlement Queue"] && deal["5. Settlement Queue"].trim() !== "") ||
+        (deal["6. Settled"] && deal["6. Settled"].trim() !== "") ||
+        (deal["2025 Settlement"] && deal["2025 Settlement"].trim() !== "") ||
+        (deal["2024 Settlement"] && deal["2024 Settlement"].trim() !== "");
+
+      if (isConverted) {
+        acc[deal.broker_name].converted++;
+      }
+
+      // Check if deal is lost
+      const isSettled = deal["6. Settled"] && deal["6. Settled"].trim() !== "";
+      const isLost = deal.status === "Lost";
+
+      if (isLost) {
+        acc[deal.broker_name].lost++;
+      } else if (!isSettled) {
+        // Deal is in progress (not lost and not settled)
+        acc[deal.broker_name].inProgress++;
+        if (isConverted) {
+          acc[deal.broker_name].inProgressConverted++;
+        }
+      }
+
+      if (isSettled) {
+        acc[deal.broker_name].settled++;
+        acc[deal.broker_name].value += deal.deal_value || 0;
+      }
+      return acc;
+    }, {} as Record<string, { total: number; settled: number; value: number; converted: number; lost: number; inProgress: number; inProgressConverted: number }>);
+    
+    return Object.entries(brokerStats).map(([name, stats]) => {
+      // Calculate source breakdown for this broker
+      const brokerDeals = filteredDeals.filter(deal => deal.broker_name === name);
+      
+      const sourceBreakdown = [
+        {
+          source: "RedNote",
+          deals: brokerDeals.filter(d => d["From Rednote?"] === "Yes")
+        },
+        {
+          source: "LifeX",
+          deals: brokerDeals.filter(d => d["From LifeX?"] === "Yes")
+        },
+        {
+          source: "Referral",
+          deals: brokerDeals.filter(d => d["From Rednote?"] === "No" && d["From LifeX?"] === "No")
+        }
+      ].map(sourceData => {
+        const total = sourceData.deals.length;
+        const settled = sourceData.deals.filter(d => d["6. Settled"] && d["6. Settled"].trim() !== "").length;
+        const converted = sourceData.deals.filter(d => 
+          (d["1. Application"] && d["1. Application"].trim() !== "") ||
+          (d["2. Assessment"] && d["2. Assessment"].trim() !== "") ||
+          (d["3. Approval"] && d["3. Approval"].trim() !== "") ||
+          (d["4. Loan Document"] && d["4. Loan Document"].trim() !== "") ||
+          (d["5. Settlement Queue"] && d["5. Settlement Queue"].trim() !== "") ||
+          (d["6. Settled"] && d["6. Settled"].trim() !== "") ||
+          (d["2025 Settlement"] && d["2025 Settlement"].trim() !== "") ||
+          (d["2024 Settlement"] && d["2024 Settlement"].trim() !== "")
+        ).length;
+        const lost = sourceData.deals.filter(d => d.status === "Lost").length;
+        const value = sourceData.deals.filter(d => d["6. Settled"] && d["6. Settled"].trim() !== "")
+          .reduce((sum, deal) => sum + (deal.deal_value || 0), 0);
+        const inProgress = total - settled - lost;
+        const inProgressDeals = sourceData.deals.filter(d =>
+          d.status !== "Lost" && !(d["6. Settled"] && d["6. Settled"].trim() !== ""));
+        const inProgressConverted = inProgressDeals.filter(d =>
+          (d["1. Application"] && d["1. Application"].trim() !== "") ||
+          (d["2. Assessment"] && d["2. Assessment"].trim() !== "") ||
+          (d["3. Approval"] && d["3. Approval"].trim() !== "") ||
+          (d["4. Loan Document"] && d["4. Loan Document"].trim() !== "") ||
+          (d["5. Settlement Queue"] && d["5. Settlement Queue"].trim() !== "") ||
+          (d["2025 Settlement"] && d["2025 Settlement"].trim() !== "") ||
+          (d["2024 Settlement"] && d["2024 Settlement"].trim() !== "")
+        ).length;
+
+        return {
+          source: sourceData.source,
+          total,
+          converted,
+          conversionRate: total > 0 ? ((converted / total) * 100).toFixed(1) : "0",
+          lost,
+          settled,
+          settledRate: total > 0 ? ((settled / total) * 100).toFixed(1) : "0",
+          value,
+          inProgress,
+          inProgressConverted
+        };
+      }).filter(s => s.total > 0); // Only include sources with deals
+      
+      return {
+        name,
+        ...stats,
+        conversionRate: stats.total > 0 ? ((stats.converted / stats.total) * 100).toFixed(1) : "0",
+        settledRate: stats.total > 0 ? ((stats.settled / stats.total) * 100).toFixed(1) : "0",
+        sourceBreakdown
+      };
+    }).sort((a, b) => b.value - a.value);
   }, [filteredDeals]);
 
   const brokerWeeklyAverage = useMemo(() => {
@@ -1145,28 +1653,25 @@ export function DealsDashboard() {
   }, [deals]);
 
   const brokerDistributionData = useMemo(() => {
-    // Calculate all brokers' total deals from all time (unfiltered)
-    const allTimeBrokerStats = deals.reduce((acc, deal) => {
-      acc[deal.broker_name] = (acc[deal.broker_name] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    // Take top 10 brokers
+    const topBrokers = brokers.slice(0, 10);
     
     // Outer ring: filtered time period deals (what currently shows in brokers)
-    const outerData = brokers.slice(0, 10).map((broker, index) => ({ 
+    const outerData = topBrokers.map((broker, index) => ({ 
       label: broker.name, 
       value: broker.total, // Filtered time period deals count
-      color: CHART_COLORS[index % CHART_COLORS.length] 
+      color: getBrokerColor(broker.name, index)
     }));
     
-    // Inner ring: same broker names but showing their all-time totals
-    const innerData = brokers.slice(0, 10).map((broker, index) => ({ 
+    // Inner ring: weekly average for each broker
+    const innerData = topBrokers.map((broker, index) => ({ 
       label: broker.name, 
-      value: allTimeBrokerStats[broker.name] || 0, // All-time total
-      color: CHART_COLORS[index % CHART_COLORS.length] 
+      value: brokerWeeklyAverage[broker.name] || 0, // Weekly average
+      color: getBrokerColor(broker.name, index)
     }));
     
     return { outerData, innerData };
-  }, [brokers, deals]);
+  }, [brokers, brokerWeeklyAverage]);
 
   const statusCounts = useMemo(() => {
     const counts = filteredDeals.reduce((acc, deal) => { 
@@ -1195,10 +1700,53 @@ export function DealsDashboard() {
   }, [filteredDeals, getDealDisplayStatus]);
 
   const leadSourcesData = useMemo(() => {
-    const rednoteCount = filteredDeals.filter((d) => d["From Rednote?"] === "Yes").length;
-    const lifexCount = filteredDeals.filter((d) => d["From LifeX?"] === "Yes").length;
-    const otherCount = filteredDeals.filter((d) => d["From Rednote?"] === "No" && d["From LifeX?"] === "No").length;
-    return [{ label: "RedNote", value: rednoteCount, color: CHART_COLORS[1] }, { label: "LifeX", value: lifexCount, color: CHART_COLORS[0] }, { label: "Referral", value: otherCount, color: CHART_COLORS[2] }].filter((item) => item.value > 0);
+    // Calculate data for each source
+    const sources = [
+      {
+        label: "RedNote",
+        deals: filteredDeals.filter((d) => d["From Rednote?"] === "Yes"),
+        color: CHART_COLORS[1]
+      },
+      {
+        label: "LifeX", 
+        deals: filteredDeals.filter((d) => d["From LifeX?"] === "Yes"),
+        color: CHART_COLORS[0]
+      },
+      {
+        label: "Referral",
+        deals: filteredDeals.filter((d) => d["From Rednote?"] === "No" && d["From LifeX?"] === "No"),
+        color: "#FF701F"
+      }
+    ];
+
+    return sources.map(source => {
+      const totalCount = source.deals.length;
+      const settledCount = source.deals.filter(d => d["6. Settled"] && d["6. Settled"].trim() !== "").length;
+      const convertedCount = source.deals.filter(d => 
+        (d["1. Application"] && d["1. Application"].trim() !== "") ||
+        (d["2. Assessment"] && d["2. Assessment"].trim() !== "") ||
+        (d["3. Approval"] && d["3. Approval"].trim() !== "") ||
+        (d["4. Loan Document"] && d["4. Loan Document"].trim() !== "") ||
+        (d["5. Settlement Queue"] && d["5. Settlement Queue"].trim() !== "") ||
+        (d["6. Settled"] && d["6. Settled"].trim() !== "") ||
+        (d["2025 Settlement"] && d["2025 Settlement"].trim() !== "") ||
+        (d["2024 Settlement"] && d["2024 Settlement"].trim() !== "")
+      ).length;
+      
+      const conversionRate = totalCount > 0 ? ((convertedCount / totalCount) * 100).toFixed(1) : "0";
+      const settleRate = totalCount > 0 ? ((settledCount / totalCount) * 100).toFixed(1) : "0";
+      
+      return {
+        label: source.label,
+        value: totalCount,
+        color: source.color,
+        conversionRate,
+        settleRate,
+        convertedCount,
+        settledCount
+      };
+    }).filter((item) => item.value > 0)
+     .sort((a, b) => b.value - a.value);
   }, [filteredDeals]);
 
   const newDeals = useMemo(() => {
@@ -1264,8 +1812,8 @@ export function DealsDashboard() {
             if (bValue === -1) bValue = 999;
             break;
           case "source":
-            aValue = a["From Rednote?"] === "Yes" ? "RedNote" : a["From LifeX?"] === "Yes" ? "LifeX" : "Other";
-            bValue = b["From Rednote?"] === "Yes" ? "RedNote" : b["From LifeX?"] === "Yes" ? "LifeX" : "Other";
+            aValue = a["From Rednote?"] === "Yes" ? "RedNote" : a["From LifeX?"] === "Yes" ? "LifeX" : "Referral";
+            bValue = b["From Rednote?"] === "Yes" ? "RedNote" : b["From LifeX?"] === "Yes" ? "LifeX" : "Referral";
             break;
           case "latest_date":
             aValue = a.created_time || "";
@@ -1394,13 +1942,15 @@ export function DealsDashboard() {
       return acc;
     }, {} as Record<string, number>);
 
-    return Object.entries(brokerCounts)
-      .map(([broker, count], index) => ({
-        label: broker,
-        value: count,
-        color: CHART_COLORS[index % CHART_COLORS.length],
-      }))
-      .sort((a, b) => b.value - a.value);
+    // First sort to get consistent ordering
+    const sortedBrokers = Object.entries(brokerCounts)
+      .sort((a, b) => b[1] - a[1]);
+
+    return sortedBrokers.map(([broker, count], index) => ({
+      label: broker,
+      value: count,
+      color: getBrokerColor(broker, index), // Use fixed colors for Miao (Amy) and QianShuo(Jo)
+    }));
   }, [newDeals]);
 
   const newDealsSourceDistributionByBroker = useMemo(() => {
@@ -1436,9 +1986,9 @@ export function DealsDashboard() {
     }, {} as Record<string, number>);
 
     return [
-      { label: "RED", value: sourceCounts["RED"] || 0, color: CHART_COLORS[1] },
-      { label: "LIFEX", value: sourceCounts["LIFEX"] || 0, color: CHART_COLORS[0] },
-      { label: "REFERRAL", value: sourceCounts["REFERRAL"] || 0, color: CHART_COLORS[2] },
+      { label: "RED", value: sourceCounts["RED"] || 0, color: CHART_COLORS[1] }, // Pink
+      { label: "LIFEX", value: sourceCounts["LIFEX"] || 0, color: CHART_COLORS[0] }, // Purple
+      { label: "REFERRAL", value: sourceCounts["REFERRAL"] || 0, color: "#FF701F" }, // Orange - same as Lead Sources
     ].filter(item => item.value > 0);
   }, [newDeals]);
 
@@ -1456,22 +2006,38 @@ export function DealsDashboard() {
       sourceBrokerCounts[source][brokerName] = (sourceBrokerCounts[source][brokerName] || 0) + 1;
     });
 
+    // Create a broker order map based on newDealsBrokerDistribution
+    const brokerOrderMap: Record<string, number> = {};
+    newDealsBrokerDistribution.forEach((broker, index) => {
+      brokerOrderMap[broker.label] = index;
+    });
+
     const result: Record<string, Array<{ label: string; value: number; color: string }>> = {};
     Object.entries(sourceBrokerCounts).forEach(([source, brokerCounts]) => {
-      // Find the color of the source from the main distribution
-      const sourceColor = newDealsAllSourcesDistribution.find(item => item.label === source)?.color || CHART_COLORS[0];
+      // Sort brokers using the same order as newDealsBrokerDistribution
+      const sortedBrokers = Object.entries(brokerCounts)
+        .sort((a, b) => {
+          const orderA = brokerOrderMap[a[0]] ?? 999;
+          const orderB = brokerOrderMap[b[0]] ?? 999;
+          return orderA - orderB;
+        });
       
-      result[source] = Object.entries(brokerCounts)
-        .map(([brokerName, count]) => ({
+      result[source] = sortedBrokers.map(([brokerName, count]) => {
+        // Find the index from the main broker distribution
+        const brokerIndex = brokerOrderMap[brokerName] ?? 0;
+        const baseColor = getBrokerColor(brokerName, brokerIndex);
+        // Add 30% transparency (70% opacity) to the color
+        const colorWithOpacity = baseColor + "B3"; // B3 is hex for 70% opacity (179/255)
+        return {
           label: brokerName,
           value: count,
-          color: sourceColor, // Use the same color as the parent source
-        }))
-        .sort((a, b) => b.value - a.value);
+          color: colorWithOpacity,
+        };
+      });
     });
 
     return result;
-  }, [newDeals, newDealsAllSourcesDistribution]);
+  }, [newDeals, newDealsAllSourcesDistribution, newDealsBrokerDistribution]);
 
   const newDealsStatusDistribution = useMemo(() => {
     const statusCounts = newDeals.reduce((acc, deal) => {
@@ -1664,17 +2230,6 @@ export function DealsDashboard() {
         </div>
 
         <div className="flex items-center gap-3">
-          <Link href="/marketing">
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-white/60 border-violet/30 text-violet hover:bg-violet hover:text-white transition-all duration-300 shadow-sm hover:shadow-lg backdrop-blur-sm"
-              title="营销仪表板"
-            >
-              <BarChart3 className="h-4 w-4 mr-2" />
-              营销
-            </Button>
-          </Link>
           {isSupported && (
             <Button
               variant="outline"
@@ -1688,7 +2243,11 @@ export function DealsDashboard() {
           )}
           <Button 
             variant="outline" 
-            onClick={() => { setDeals([]); setError(null) }} 
+            onClick={() => { 
+              setDeals([]); 
+              setError(null);
+              sessionStorage.removeItem('dashboard-deals-data');
+            }} 
             className="bg-gradient-to-r from-hot-pink to-violet text-white border-0 hover:from-violet hover:to-hot-pink transition-all duration-300 font-semibold shadow-lg hover:shadow-xl transform hover:scale-105"
           >
             <Upload className="h-4 w-4 mr-2" />
@@ -1700,17 +2259,41 @@ export function DealsDashboard() {
       <div className="relative z-40 container mx-auto p-8 space-y-8">
         <Card className="bg-white/95 backdrop-blur-xl border-0 shadow-2xl shadow-violet/10 ring-1 ring-violet/20">
           <CardHeader className="pb-6">
-            <CardTitle className="flex items-center gap-3 text-2xl font-bold">
-              <div className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg">
-                <Filter className="h-5 w-5 text-white" />
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-3 text-2xl font-bold">
+                  <div className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg">
+                    <Filter className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="text-gray-800 font-black">
+                    Time Filters
+                  </span>
+                </CardTitle>
+                <CardDescription className="text-gray-600 text-base font-medium">
+                  Filter your deals data by date range to focus on specific time periods
+                </CardDescription>
               </div>
-              <span className="text-gray-800 font-black">
-                Time Filters
-              </span>
-            </CardTitle>
-            <CardDescription className="text-gray-600 text-base font-medium">
-              Filter your deals data by date range to focus on specific time periods
-            </CardDescription>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => navigateWeek('prev')}
+                  className="bg-white/60 border-violet/30 text-violet hover:bg-violet hover:text-white transition-all duration-200 font-semibold"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Previous Week
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => navigateWeek('next')}
+                  className="bg-white/60 border-violet/30 text-violet hover:bg-violet hover:text-white transition-all duration-200 font-semibold"
+                >
+                  Next Week
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -1730,7 +2313,7 @@ export function DealsDashboard() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
+                    <CalendarComponent
                       mode="single"
                       selected={startDate ? new Date(startDate) : undefined}
                       onSelect={(date) => setStartDate(date ? format(date, "yyyy-MM-dd") : "")}
@@ -1755,7 +2338,7 @@ export function DealsDashboard() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
+                    <CalendarComponent
                       mode="single"
                       selected={endDate ? new Date(endDate) : undefined}
                       onSelect={(date) => setEndDate(date ? format(date, "yyyy-MM-dd") : "")}
@@ -1822,7 +2405,7 @@ export function DealsDashboard() {
               </div>
               <p className="text-xs text-gray-600 font-semibold">
                 {stats.settledCount} settled, {stats.lostDeals} lost
-                {(searchTerm || statusFilter !== "all" || brokerFilter !== "all" || sourceFilter !== "all" || startDate || endDate) && " (filtered)"}
+                {(searchTerm || statusFilter !== "all" || brokerFilter !== "all" || startDate || endDate) && " (filtered)"}
               </p>
             </CardContent>
           </Card>
@@ -1919,17 +2502,21 @@ export function DealsDashboard() {
                 <CardDescription className="text-gray-600 font-medium">A summary of all deals based on the current filters.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                  <div className="lg:col-span-1">
+                <div className="grid gap-6 md:grid-cols-2 items-stretch">
+                  <div className="flex flex-col">
                     <h3 className="font-semibold mb-2 text-center text-lg text-violet">Lead Sources</h3>
                     <p className="text-center text-sm text-violet/70 mb-4">Total: {leadSourcesData.reduce((sum, item) => sum + item.value, 0)} deals</p>
-                    <PieChart data={leadSourcesData} size={250} />
+                    <div className="flex-grow flex items-center justify-center min-h-[350px]">
+                      <PieChart data={leadSourcesData} size={350} />
+                    </div>
                     <ChartComment chartId="lead-sources" chartTitle="Lead Sources" />
                   </div>
-                  <div className="lg:col-span-2">
+                  <div className="flex flex-col">
                     <h3 className="font-semibold mb-2 text-center text-lg text-violet">Broker Distribution</h3>
                     <p className="text-center text-sm text-violet/70 mb-4">Total: {brokerDistributionData.outerData.reduce((sum, item) => sum + item.value, 0)} deals</p>
-                    <DoubleRingPieChart outerData={brokerDistributionData.outerData} innerData={brokerDistributionData.innerData} size={350} />
+                    <div className="flex-grow flex items-center justify-center min-h-[350px]">
+                      <DoubleRingPieChart outerData={brokerDistributionData.outerData} innerData={brokerDistributionData.innerData} size={350} />
+                    </div>
                     <ChartComment chartId="broker-distribution" chartTitle="Broker Distribution" />
                   </div>
                 </div>
@@ -1940,6 +2527,14 @@ export function DealsDashboard() {
                       <Search className="h-5 w-5" />
                       All Deals ({filteredDeals.length} total)
                     </CardTitle>
+                    <p className="text-sm text-violet/70 mt-2">
+                      💡 Click column headers to sort. Hold Ctrl/Cmd + click to sort by multiple columns.
+                      {sortColumns.length > 0 && (
+                        <span className="ml-2 text-purple-600 font-medium">
+                          Currently sorting by {sortColumns.length} column{sortColumns.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </p>
                     <div className="flex gap-4 pt-4">
                       <Input 
                         placeholder="Search by deal or broker..." 
@@ -1975,7 +2570,7 @@ export function DealsDashboard() {
                           <SelectItem value="all">All Sources</SelectItem>
                           <SelectItem value="rednote">RedNote</SelectItem>
                           <SelectItem value="lifex">LifeX</SelectItem>
-                          <SelectItem value="other">Other</SelectItem>
+                          <SelectItem value="referral">Referral</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1986,38 +2581,101 @@ export function DealsDashboard() {
                         <TableHeader>
                           <TableRow>
                             <TableHead>
-                              <Button variant="ghost" onClick={() => handleSort("deal_name")}>
+                              <Button 
+                                variant="ghost" 
+                                onClick={(e) => handleSort("deal_name", e.ctrlKey || e.metaKey)}
+                                className="relative"
+                              >
                                 Deal Name {getSortIcon("deal_name")}
+                                {getSortOrder("deal_name") && (
+                                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                                    {getSortOrder("deal_name")}
+                                  </span>
+                                )}
                               </Button>
                             </TableHead>
                             <TableHead>
-                              <Button variant="ghost" onClick={() => handleSort("broker_name")}>
+                              <Button 
+                                variant="ghost" 
+                                onClick={(e) => handleSort("broker_name", e.ctrlKey || e.metaKey)}
+                                className="relative"
+                              >
                                 Broker {getSortIcon("broker_name")}
+                                {getSortOrder("broker_name") && (
+                                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                                    {getSortOrder("broker_name")}
+                                  </span>
+                                )}
                               </Button>
                             </TableHead>
                             <TableHead>
-                              <Button variant="ghost" onClick={() => handleSort("deal_value")}>
+                              <Button 
+                                variant="ghost" 
+                                onClick={(e) => handleSort("deal_value", e.ctrlKey || e.metaKey)}
+                                className="relative"
+                              >
                                 Value {getSortIcon("deal_value")}
+                                {getSortOrder("deal_value") && (
+                                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                                    {getSortOrder("deal_value")}
+                                  </span>
+                                )}
                               </Button>
                             </TableHead>
                             <TableHead>
-                              <Button variant="ghost" onClick={() => handleSort("status")}>
+                              <Button 
+                                variant="ghost" 
+                                onClick={(e) => handleSort("status", e.ctrlKey || e.metaKey)}
+                                className="relative"
+                              >
                                 Status {getSortIcon("status")}
+                                {getSortOrder("status") && (
+                                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                                    {getSortOrder("status")}
+                                  </span>
+                                )}
                               </Button>
                             </TableHead>
                             <TableHead>
-                              <Button variant="ghost" onClick={() => handleSort("source")}>
+                              <Button 
+                                variant="ghost" 
+                                onClick={(e) => handleSort("source", e.ctrlKey || e.metaKey)}
+                                className="relative"
+                              >
                                 Source {getSortIcon("source")}
+                                {getSortOrder("source") && (
+                                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                                    {getSortOrder("source")}
+                                  </span>
+                                )}
                               </Button>
                             </TableHead>
                             <TableHead>
-                              <Button variant="ghost" onClick={() => handleSort("process_days")}>
+                              <Button 
+                                variant="ghost" 
+                                onClick={(e) => handleSort("process_days", e.ctrlKey || e.metaKey)}
+                                className="relative"
+                              >
                                 Process Days {getSortIcon("process_days")}
+                                {getSortOrder("process_days") && (
+                                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                                    {getSortOrder("process_days")}
+                                  </span>
+                                )}
                               </Button>
                             </TableHead>
                             <TableHead>
-                              <Button variant="ghost" onClick={() => handleSort("latest_date")}>
+                              <Button 
+                                variant="ghost" 
+                                onClick={(e) => handleSort("latest_date", e.ctrlKey || e.metaKey)}
+                                className="relative"
+                              >
                                 Latest Update {getSortIcon("latest_date")}
+                                {getSortOrder("latest_date") && (
+                                  <span className="absolute -top-1 -right-1 bg-purple-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                                    {getSortOrder("latest_date")}
+                                  </span>
+                                )}
                               </Button>
                             </TableHead>
                           </TableRow>
@@ -2042,7 +2700,7 @@ export function DealsDashboard() {
                                 </TableCell>
                                 <TableCell className="text-deep-purple-text">
                                   {deal["From Rednote?"] === "Yes" ? "RedNote" : 
-                                   deal["From LifeX?"] === "Yes" ? "LifeX" : "Other"}
+                                   deal["From LifeX?"] === "Yes" ? "LifeX" : "Referral"}
                                 </TableCell>
                                 <TableCell className="text-deep-purple-text">
                                   {deal["process days"]}
@@ -2207,7 +2865,7 @@ export function DealsDashboard() {
                             </TableCell>
                             <TableCell className="text-deep-purple-text">
                               {deal["From Rednote?"] === "Yes" ? "RedNote" : 
-                               deal["From LifeX?"] === "Yes" ? "LifeX" : "Other"}
+                               deal["From LifeX?"] === "Yes" ? "LifeX" : "Referral"}
                             </TableCell>
                             <TableCell className="text-deep-purple-text">
                               {deal.created_time ? new Date(deal.created_time).toLocaleDateString() : "N/A"}
@@ -2228,36 +2886,7 @@ export function DealsDashboard() {
             </Card>
           </TabsContent>
           <TabsContent value="brokers">
-            <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
-              <CardHeader>
-                <CardTitle className="text-violet">Broker Performance</CardTitle>
-                <CardDescription className="text-violet/80">Performance metrics for each broker. Total brokers: {brokers.length}, Total deals: {brokers.reduce((sum, broker) => sum + broker.total, 0)}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Broker</TableHead>
-                      <TableHead>Total Deals</TableHead>
-                      <TableHead>Settled Deals</TableHead>
-                      <TableHead>Settled Rate</TableHead>
-                      <TableHead>Total Value Settled</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {brokers.map((broker) => (
-                      <TableRow key={broker.name}>
-                        <TableCell className="font-medium text-deep-purple-text">{broker.name}</TableCell>
-                        <TableCell className="text-deep-purple-text">{broker.total}</TableCell>
-                        <TableCell className="text-deep-purple-text">{broker.settled}</TableCell>
-                        <TableCell className="text-deep-purple-text">{broker.settledRate}%</TableCell>
-                        <TableCell className="text-deep-purple-text">{formatCurrency(broker.value)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+            <BrokerPerformanceTable brokers={brokers} />
             <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
               <CardHeader>
                 <CardTitle className="text-violet">Settlement Analysis</CardTitle>
@@ -2272,8 +2901,23 @@ export function DealsDashboard() {
           <TabsContent value="pipeline">
             <Card className="bg-white/60 border-violet/20 shadow-sm mt-4">
               <CardHeader>
-                <CardTitle className="text-violet">Deal Pipeline Flow</CardTitle>
-                <CardDescription className="text-violet/80">Visualize the deal flow from lead to settlement or loss. Total deals: {filteredDeals.length}</CardDescription>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="text-violet">Deal Pipeline Flow</CardTitle>
+                    <CardDescription className="text-violet/80">Visualize the deal flow from lead to settlement or loss. Total deals: {filteredDeals.length}</CardDescription>
+                  </div>
+                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                    <SelectTrigger className="w-[180px] bg-violet/10 border-violet/30 text-deep-purple-text">
+                      <SelectValue placeholder="Filter by source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Sources</SelectItem>
+                      <SelectItem value="rednote">RedNote</SelectItem>
+                      <SelectItem value="lifex">LifeX</SelectItem>
+                      <SelectItem value="referral">Referral</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
                 <SankeyDiagram deals={filteredDeals} startDate={startDate} endDate={endDate} />
