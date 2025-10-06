@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ChartComment } from "@/components/chart-comment"
-import { ArrowUp, ArrowDown, TrendingUp, Users, DollarSign, FileText } from "lucide-react"
+import { ArrowUp, ArrowDown, TrendingUp, Users, DollarSign, FileText, RotateCcw, Calendar } from "lucide-react"
 
 // Assuming the Deal interface is defined elsewhere and imported
 // For standalone development, let's define it here.
@@ -151,10 +153,15 @@ const calculateWeeklyStats = (deals: Deal[]): WeeklyStat[] => {
 
 
 export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Deal[], allDeals: Deal[] }) {
+  const [showAllData, setShowAllData] = useState(false);
+  const [selectedYear, setSelectedYear] = useState<string>("2025");
+
+  // Use allDeals when showAllData is true, otherwise use filteredDeals
+  const dataToUse = showAllData ? allDeals : filteredDeals;
 
   // Calculate settled deals details for a specific week
   const getWeekSettledDetails = useMemo(() => {
-    const weeklyGroups = filteredDeals.reduce((acc, deal) => {
+    const weeklyGroups = dataToUse.reduce((acc, deal) => {
       const dateKey = deal.latest_date || deal["6. Settled"] || deal.created_time;
       if (dateKey) {
         try {
@@ -195,9 +202,9 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
     });
 
     return result;
-  }, [filteredDeals]);
+  }, [dataToUse]);
   const weeklyData = useMemo((): WeeklyStat[] => {
-    const stats = calculateWeeklyStats(filteredDeals);
+    const stats = calculateWeeklyStats(dataToUse);
     
     const sortedByDateAsc = stats.sort((a, b) => new Date(a.week).getTime() - new Date(b.week).getTime());
 
@@ -228,10 +235,39 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
 
     return withChange.sort((a, b) => new Date(b.week).getTime() - new Date(a.week).getTime());
 
-  }, [filteredDeals]);
+  }, [dataToUse]);
+
+  // Get available years from all deals
+  const availableYears = useMemo(() => {
+    const years = new Set<string>();
+    allDeals.forEach(deal => {
+      const dateKey = deal.latest_date || deal["6. Settled"] || deal.created_time;
+      if (dateKey) {
+        try {
+          const year = new Date(dateKey).getFullYear().toString();
+          years.add(year);
+        } catch (e) {
+          // Skip invalid dates
+        }
+      }
+    });
+    return Array.from(years).sort((a, b) => parseInt(b) - parseInt(a));
+  }, [allDeals]);
 
   const averages = useMemo((): Omit<WeeklyStat, 'week'> | null => {
-    const allWeeklyStats = calculateWeeklyStats(allDeals);
+    // Filter allDeals by selected year if a specific year is chosen
+    const dealsToUse = selectedYear === "all" ? allDeals : allDeals.filter(deal => {
+      const dateKey = deal.latest_date || deal["6. Settled"] || deal.created_time;
+      if (!dateKey) return false;
+      try {
+        const dealYear = new Date(dateKey).getFullYear().toString();
+        return dealYear === selectedYear;
+      } catch (e) {
+        return false;
+      }
+    });
+
+    const allWeeklyStats = calculateWeeklyStats(dealsToUse);
     if (allWeeklyStats.length === 0) {
       return null;
     }
@@ -250,16 +286,36 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
       settledRate: sum.settledRate / totalWeeks,
       conversionRate: sum.conversionRate / totalWeeks,
     };
-  }, [allDeals]);
+  }, [allDeals, selectedYear]);
 
   return (
     <div className="space-y-6 mt-4">
       <Card className="bg-white/60 border-violet/20 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-violet">Weekly Performance Analysis</CardTitle>
-          <CardDescription className="text-violet/80">
-            A weekly breakdown of key performance metrics. Weekly cards are based on filters. The average is based on all data.
-          </CardDescription>
+          <div className="flex justify-between items-start">
+            <div>
+              <CardTitle className="text-violet">Weekly Performance Analysis</CardTitle>
+              <CardDescription className="text-violet/80">
+                A weekly breakdown of key performance metrics. {showAllData ? 'Showing all data (filters cleared).' : 'Weekly cards are based on filters.'} The average is based on all data.
+              </CardDescription>
+            </div>
+            <Button
+              variant={showAllData ? "default" : "outline"}
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault();
+                const currentScrollY = window.scrollY;
+                setShowAllData(!showAllData);
+                // Restore scroll position after state update
+                setTimeout(() => {
+                  window.scrollTo(0, currentScrollY);
+                }, 0);
+              }}
+            >
+              <RotateCcw className="h-4 w-4" />
+              {showAllData ? 'Apply Filters' : 'Clear Filters'}
+            </Button>
+          </div>
         </CardHeader>
       </Card>
 
@@ -268,19 +324,36 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
           {averages && (
             <Card className="bg-white/80 border-violet/40 shadow-lg ring-2 ring-violet/15">
               <CardHeader className="bg-gradient-to-r from-violet/5 to-hot-pink/5 rounded-t-lg">
-                <CardTitle className="text-violet font-bold text-xl flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-hot-pink" />
-                  Overall Weekly Average (All Time)
-                </CardTitle>
-                <CardDescription className="text-violet/80 font-medium">
-                  Baseline performance metrics across all historical data
-                </CardDescription>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="text-violet font-bold text-xl flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5 text-hot-pink" />
+                      Overall Weekly Average ({selectedYear === "all" ? "All Time" : selectedYear})
+                    </CardTitle>
+                    <CardDescription className="text-violet/80 font-medium">
+                      Baseline performance metrics {selectedYear === "all" ? "across all historical data" : `for ${selectedYear}`}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select value={selectedYear} onValueChange={setSelectedYear}>
+                      <SelectTrigger className="w-32 h-8 text-xs bg-white text-black">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Years</SelectItem>
+                        {availableYears.map(year => (
+                          <SelectItem key={year} value={year}>{year}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-white/50">
                 <MetricDisplay title="Avg. Total Deals" value={averages.totalDeals.toFixed(1)} icon={FileText} />
-                <MetricDisplay title="Avg. Settled Value" value={formatCurrency(averages.settledValue)} icon={DollarSign} isCurrency />
-                <MetricDisplay title="Avg. Settled Rate" value={`${averages.settledRate.toFixed(1)}%`} icon={TrendingUp} isRate />
                 <MetricDisplay title="Avg. Conversion Rate" value={`${averages.conversionRate.toFixed(1)}%`} icon={Users} isRate />
+                <MetricDisplay title="Avg. Settled Rate" value={`${averages.settledRate.toFixed(1)}%`} icon={TrendingUp} isRate />
+                <MetricDisplay title="Avg. Settled Value" value={formatCurrency(averages.settledValue)} icon={DollarSign} isCurrency />
               </CardContent>
             </Card>
           )}
@@ -296,7 +369,7 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <MetricDisplay title="Total Deals" value={stat.totalDeals.toString()} change={stat.totalDealsChange} icon={FileText} />
-                    <MetricDisplay title="Settled Value" value={formatCurrency(stat.settledValue)} change={stat.settledValueChange} icon={DollarSign} isCurrency />
+                    <MetricDisplay title="Conversion Rate" value={`${stat.conversionRate.toFixed(1)}%`} change={stat.conversionRateChange} icon={Users} isRate />
                     <MetricDisplay 
                       title="Settled Rate" 
                       value={`${stat.settledRate.toFixed(1)}%`} 
@@ -304,7 +377,7 @@ export function WeeklyAnalysis({ filteredDeals, allDeals }: { filteredDeals: Dea
                       icon={TrendingUp} 
                       isRate 
                     />
-                    <MetricDisplay title="Conversion Rate" value={`${stat.conversionRate.toFixed(1)}%`} change={stat.conversionRateChange} icon={Users} isRate />
+                    <MetricDisplay title="Settled Value" value={formatCurrency(stat.settledValue)} change={stat.settledValueChange} icon={DollarSign} isCurrency />
                     
                     {/* Always show settled deals breakdown when available */}
                     {weekDetails && weekDetails.totalSettled > 0 && (
